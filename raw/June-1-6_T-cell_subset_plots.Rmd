@@ -1,0 +1,100 @@
+---
+title: "June-1-6_T-cell_subset_plots"
+output: html_document
+date: "2025-06-10"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(harmony)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 8,name = "Set1"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "darkblue"
+pal[19] <- colors()[60]
+pal[13] <- "turquoise4"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+pal2 <- pal[c(1:8,10,13:14,16:20, 22:25,27:30, 33:35 )] # use pal2
+```
+
+```{r}
+outdir <- "T-cell_subset_V1p4/"
+if(!dir.exists(outdir))dir.create(outdir)
+```
+
+```{r}
+CD4 <- readRDS(paste0("RDS/V1p4_CD4.RDS"))
+CD8 <- readRDS(paste0("RDS/V1p4_CD8.RDS"))
+```
+
+```{r}
+g <- DimPlot(CD8, group.by = "annotation_V2")+scale_color_manual(values = getPalette.1(6))
+g
+ggsave(filename = paste0(outdir,"cytotoxic_subset_umap.pdf"), plot = g, height = 4,width = 6)
+g <- DimPlot(CD4, group.by = "annotation_V2")+scale_color_manual(values = colorRampPalette(brewer.pal(n = 8,name = "Set2"))(5))
+g
+ggsave(filename = paste0(outdir,"CD4_subset_umap.pdf"), plot = g, height = 4,width = 6)
+```
+
+```{r}
+Idents(CD8) <- "annotation_V2"
+FeaturePlot(CD8, features = "Cd8a", label = T)
+FeaturePlot(CD8, features = "Ncr1", label = T)
+FeaturePlot(CD8, features = c("Cd8a","Tyrobp","Klrb1c","Cd3e"), label = T,repel = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(CD8, features = "Cd3e", label = T)
+FeaturePlot(CD8, features = c("Cd44","Pdcd1","Havcr2","Sell"), label = T,repel = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(CD8, features = "Icos", label = T)
+FeaturePlot(CD8, features = c("Gzmb","Gzmk","Fos","Isg15"), label = T,repel = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(CD8, features = "Lag3", label = T)
+FeaturePlot(CD8, features = c("Gzmb", "Lag3","Prf1","Klrg1"), label = T,repel = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+```{r}
+markers <- c("Cd3e","Ncr1","Tyrobp","Klrb1c","Cd8a","Lef1","Ccr7","Slamf6","Isg15","Cd69","Il2ra","Cd44","Prf1","Gzmb","Gzmk","Lag3","Pdcd1","Tox","Havcr2","Mki67")
+
+glist <- lapply(markers, function(x){
+  FeaturePlot(CD8, features = x,label = T, repel = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 5)
+ggsave(paste0(outdir, "CD8_markers_featurePlot.pdf"), plot = g, width = 25, height = 20)
+
+
+```
+
+```{r}
+g <- FeaturePlot(CD4, features = "Tr1_signature_Houssain1")+scale_color_gradientn(colors = c("grey","white","red3"))
+g
+ggsave(filename = paste0(outdir,"CD4_Tr1-mapping.pdf"), plot = g, height = 4,width = 6)
+```
+```{r}
+FeaturePlot(CD4, features = "Rorc",label = T, repel = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+```{r}
+glist[[21]]
+```
+
+```{r}
+Idents(CD4) <- "annotation_V2"
+markers <- c("Cd3e","Cd4","Tcf7","Foxp3","Tbx21","Gata3","Icos","Slamf6","Il5","Il13","Il2ra","Cd44","Gzmb","Lilrb4a","Lag3","Pdcd1","Tox","Havcr2")
+
+glist <- lapply(markers, function(x){
+  FeaturePlot(CD4, features = x,label = T, repel = F) + scale_color_gradientn(colors = c("grey90","red2","red3"))
+})
+
+
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 4)
+ggsave(paste0(outdir, "CD4_markers_featurePlot.pdf"), plot = g, width = 25, height = 20)
+
+
+```
+
+

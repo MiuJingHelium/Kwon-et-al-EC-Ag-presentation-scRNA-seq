@@ -1,0 +1,419 @@
+---
+title: "1-1-2_process_myeloid"
+output: html_document
+date: "2025-04-08"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(harmony)
+library(SeuratWrappers)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "RDS/"
+outdir <- "RDS/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+```{r}
+whole <- readRDS(paste0(outdir,"whole_V1p2.RDS"))
+```
+
+## isolate (pan)-myeloid and merge with myeloid small
+
+```{r}
+myeloid <- subset(whole, subset = RNA_snn_res.0.2 %in% c(0, 4, 5, 6, 7, 10))
+```
+
+```{r}
+DimPlot(myeloid)
+```
+
+```{r}
+myeloid_s <- readRDS(paste0(outdir,"myeloid-s_V1p2.RDS"))
+```
+
+```{r}
+myeloid <- merge(myeloid, myeloid_s)
+myeloid <- JoinLayers(myeloid)
+```
+
+```{r}
+myeloid <- FindVariableFeatures(object = myeloid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeaturePlot(myeloid)
+myeloid <- ScaleData(object = myeloid, features = VariableFeatures(object = myeloid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+myeloid <- RunPCA(object = myeloid,
+                features =  VariableFeatures(object = myeloid),
+                dims = 1:50)
+gc()
+ElbowPlot(myeloid,ndims = 50)
+```
+
+```{r}
+myeloid <- RunHarmony(object = myeloid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+myeloid <- RunUMAP(myeloid,dims = 1:30,reduction = "harmony")
+myeloid <- RunTSNE(myeloid,dims = 1:30,reduction = "harmony")
+
+myeloid <- FindNeighbors(myeloid, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  myeloid <- FindClusters(object = myeloid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+myeloid <- JoinLayers(myeloid)
+```
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.2"
+DimPlot(myeloid, group.by = "RNA_snn_res.0.2",label = T)+scale_color_manual(values = pal)
+DimPlot(myeloid, group.by = "orig.ident",shuffle = T)+scale_color_manual(values = pal)
+FeaturePlot(myeloid, features = "Adgre1",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+VlnPlot(myeloid,features = c("log10_nFeature_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(myeloid,features = c("log10_nCount_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(myeloid,features = c("percent.mt"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67"),group.by = "RNA_snn_res.0.2")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Arg1","Mrc1","Nos2","Adgre1","Lyz2","Cx3cr1","Cxcr3","Lgals3","Lamp3","Trem2","Apo3","Gpnmb"),group.by = "RNA_snn_res.0.2")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Tcf7","Lef1","Foxp3","Klrb1c","Tyrobp","Prf1","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Tox","Eomes","Ikzf2","Mki67","H2-Ab1","Cd74"),group.by = "RNA_snn_res.0.2")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+DimPlot(myeloid,group.by = "DF.classifications")+scale_color_manual(values = pal[c(19,21)])
+```
+
+
+```{r}
+saveRDS(myeloid, file = paste0(outdir,"myeloid_V1p2.RDS"))
+```
+
+
+
+
+
+## second iter without c2
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.2"
+myeloid <- subset(myeloid, idents=c(0:1,3:11))
+```
+
+```{r}
+DimPlot(myeloid, group.by = "RNA_snn_res.0.2",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+myeloid <- FindVariableFeatures(object = myeloid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeaturePlot(myeloid)
+myeloid <- ScaleData(object = myeloid, features = VariableFeatures(object = myeloid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+myeloid <- RunPCA(object = myeloid,
+                features =  VariableFeatures(object = myeloid),
+                dims = 1:50)
+gc()
+ElbowPlot(myeloid,ndims = 50)
+```
+
+```{r}
+myeloid <- RunHarmony(object = myeloid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+myeloid <- RunUMAP(myeloid,dims = 1:30,reduction = "harmony")
+myeloid <- RunTSNE(myeloid,dims = 1:30,reduction = "harmony")
+
+myeloid <- FindNeighbors(myeloid, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  myeloid <- FindClusters(object = myeloid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+myeloid <- JoinLayers(myeloid)
+```
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.2"
+DimPlot(myeloid, group.by = "RNA_snn_res.0.2",label = T)+scale_color_manual(values = pal)
+DimPlot(myeloid, group.by = "orig.ident",shuffle = T)+scale_color_manual(values = pal)
+FeaturePlot(myeloid, features = "Ptprc",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+VlnPlot(myeloid,features = c("log10_nFeature_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(myeloid,features = c("log10_nCount_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(myeloid,features = c("percent.mt"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67"),group.by = "RNA_snn_res.0.2")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Arg1","Mrc1","Nos2","Adgre1","Lyz2","Cx3cr1","Cxcr3","Lgals3","Lamp3","Trem2","Apoe","Gpnmb","Cd163","Cd14","Clec9a","Clec10a","Fcgr3"),group.by = "RNA_snn_res.0.2")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Tcf7","Lef1","Foxp3","Klrb1c","Tyrobp","Prf1","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Tox","Eomes","Ikzf2","Mki67","H2-Ab1","Cd74"),group.by = "RNA_snn_res.0.2")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+DimPlot(myeloid,group.by = "DF.classifications")+scale_color_manual(values = pal[c(19,21)])
+```
+
+
+```{r}
+clust_prop_grouped <- myeloid@meta.data  %>%   
+  group_by(RNA_snn_res.0.2,orig.ident) %>% 
+  summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(cluster_prop = n/sum(n))
+
+
+ratio <- clust_prop_grouped %>% group_by(RNA_snn_res.0.2) %>% reframe(FC = log2(cluster_prop[orig.ident == "KO_HC"]/cluster_prop[orig.ident == "WT_HC"]))
+
+g4 <- ggplot(ratio, aes( x = reorder(RNA_snn_res.0.2, -FC), y = FC))+
+  geom_bar(aes(fill = RNA_snn_res.0.2),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 proportion in KO v.s. WT")+
+  xlab("res=0.2 clusters")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+g4
+```
+
+
+```{r}
+FeaturePlot(myeloid, features = "Ptprc",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Csf3r",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Retnlg",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Il1b",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+
+```{r}
+myeloid$compartment <- "Myeloid"
+```
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% mutate(
+  annotation_V1 = case_match(
+    as.character(RNA_snn_res.0.2),
+    "0" ~ "M0: mo-Mac1",
+    "1" ~ "M1: mo-Mac2",
+    "2" ~ "M2: Mac-like/artifact-like",
+    "3" ~ "M3: mo-DC/monocytes",
+    "4" ~ "M4: Neutrophil-like",
+    "5" ~ "M5: migDC",
+    "6" ~ "M6: proliferating mo-Mac",
+    "7" ~ "M7: cDC1/DC2",
+    "8" ~ "M8: mo-Mac3",
+    "9" ~ "M9: mo-Mac4",
+    "10" ~ "M10: granulocytes"
+  )
+)
+
+```
+
+
+```{r}
+DimPlot(myeloid, group.by = "annotation_V1",label = T,repel = T,label.box = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)
+```
+
+
+```{r}
+saveRDS(myeloid, file = paste0(outdir,"myeloid_V1p3.RDS"))
+```
+
+## remove artifact-like cluster
+
+```{r}
+myeloid <- readRDS(paste0(outdir,"myeloid_V1p3.RDS"))
+```
+
+```{r}
+DimPlot(myeloid, group.by = "annotation_V1",label = F,repel = T,label.box = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)
+DimPlot(myeloid, group.by = "RNA_snn_res.0.2",label = F,repel = T,label.box = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)
+```
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.2"
+myeloid <- subset(myeloid, idents = 2, invert = T)
+
+```
+
+```{r}
+DimPlot(myeloid, group.by = "annotation_V1",label = F,repel = T,label.box = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)
+DimPlot(myeloid, group.by = "RNA_snn_res.0.2",label = F,repel = T,label.box = T)+scale_color_manual(values = pal)+scale_fill_manual(values = pal)
+```
+
+```{r}
+myeloid <- FindVariableFeatures(object = myeloid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeaturePlot(myeloid)
+myeloid <- ScaleData(object = myeloid, features = VariableFeatures(object = myeloid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+myeloid <- RunPCA(object = myeloid,
+                features =  VariableFeatures(object = myeloid),
+                dims = 1:50)
+gc()
+ElbowPlot(myeloid,ndims = 50)
+```
+
+```{r}
+myeloid <- RunHarmony(object = myeloid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+myeloid <- RunUMAP(myeloid,dims = 1:20,reduction = "harmony")
+myeloid <- RunTSNE(myeloid,dims = 1:20,reduction = "harmony")
+
+myeloid <- FindNeighbors(myeloid, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  myeloid <- FindClusters(object = myeloid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+myeloid <- JoinLayers(myeloid)
+```
+
+```{r}
+DimPlot(myeloid, group.by = "RNA_snn_res.0.3",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+FeaturePlot(myeloid, features = "Snx31",order = T)
+FeaturePlot(myeloid, features = "Cpb2",order = T)
+```
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.3"
+DimPlot(myeloid, group.by = "RNA_snn_res.0.3",label = T)+scale_color_manual(values = pal)
+DimPlot(myeloid, group.by = "orig.ident",shuffle = T)+scale_color_manual(values = pal)
+FeaturePlot(myeloid, features = "Ptprc",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+VlnPlot(myeloid,features = c("log10_nFeature_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(myeloid,features = c("log10_nCount_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(myeloid,features = c("percent.mt"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ncr1","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Cadm1","Xcr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67"),group.by = "RNA_snn_res.0.3")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Arg1","Mrc1","Nos2","Adgre1","Lyz2","Cx3cr1","Cxcr3","Lgals3","Lamp3","Trem2","Apoe","Gpnmb","Cd163","Cd14","Clec9a","Clec10a","Fcgr3"),group.by = "RNA_snn_res.0.3")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(myeloid,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Tcf7","Lef1","Foxp3","Klrb1c","Tyrobp","Prf1","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Tox","Eomes","Ikzf2","Mki67","H2-Ab1","Cd74"),group.by = "RNA_snn_res.0.3")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+DimPlot(myeloid,group.by = "DF.classifications")+scale_color_manual(values = pal[c(19,21)])
+```
+
+
+```{r}
+# DC panel
+g<- DotPlot(myeloid, features = c("Cadm1","Itgax","Il3ra","Cd14","Thbd","Cd163","Sirpa","Cd226","Nrp1","Clec10a","Cd5","Fcgr1a","C5ar1","Fcer1a","Clec9a","S100a8","S100a9","Xcr1","Irf8","Ccr2","C1qc","Csf1r","Cx3cr1","Mrc1","Trem2","Lilrb4a","Spib","Ikzf1","Axl"),group.by = "RNA_snn_res.0.3",cluster.idents = T)+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+g
+```
+
+```{r}
+FeaturePlot(myeloid, features = "Adgre1",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Xcr1",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Flt3",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Clec10a",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "S100a8",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Cd200r3",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Axl",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Gpnmb",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(myeloid, features = "Trem2",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+
+
+```{r}
+clust_prop_grouped <- myeloid@meta.data  %>%   
+  group_by(RNA_snn_res.0.3,orig.ident) %>% 
+  summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(cluster_prop = n/sum(n))
+
+
+ratio <- clust_prop_grouped %>% group_by(RNA_snn_res.0.3) %>% reframe(FC = log2(cluster_prop[orig.ident == "KO_HC"]/cluster_prop[orig.ident == "WT_HC"]))
+
+g4 <- ggplot(ratio, aes( x = reorder(RNA_snn_res.0.3, -FC), y = FC))+
+  geom_bar(aes(fill = RNA_snn_res.0.3),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 proportion in KO v.s. WT")+
+  xlab("res=0.3 clusters")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+g4
+```
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% mutate(
+  annotation_V1 = case_match(
+    as.character(RNA_snn_res.0.3),
+    "0" ~ "M0: mo-Mac1",
+    "1" ~ "M1: mo-Mac2",
+    "2" ~ "M2: Neutrophil",
+    "3" ~ "M3: cDC2",
+    "4" ~ "M4: mo-Mac3",
+    "5" ~ "M5: migDC",
+    "6" ~ "M6: proliferating mo-Mac",
+    "7" ~ "M7: cDC1_DC2",
+    "8" ~ "M8: mo-Mac4",
+    "9" ~ "M9: mast cells"
+  )
+)
+```
+
+```{r}
+clust_prop_grouped <- myeloid@meta.data  %>%   
+  group_by(annotation_V1,orig.ident) %>% 
+  summarise(n = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(cluster_prop = n/sum(n))
+
+
+ratio <- clust_prop_grouped %>% group_by(annotation_V1) %>% reframe(FC = log2(cluster_prop[orig.ident == "KO_HC"]/cluster_prop[orig.ident == "WT_HC"]))
+
+g4 <- ggplot(ratio, aes( x = reorder(annotation_V1, -FC), y = FC))+
+  geom_bar(aes(fill = annotation_V1),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 proportion in KO v.s. WT")+
+  xlab("res=0.3 clusters")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+g4
+```
+
+```{r}
+saveRDS(myeloid, file = paste0(outdir,"myeloid_V1p4.RDS"))
+```
+
+### remove M8 because of noise 
+
+```{r}
+myeloid <- readRDS(paste0(outdir,"myeloid_V1p4.RDS"))
+```
+
+```{r}
+Idents(myeloid) <- "RNA_snn_res.0.3"
+myeloid <- subset(myeloid, idents = 8, invert = T)
+```
+
+```{r}
+DimPlot(myeloid)
+```
+
+```{r}
+myeloid <- FindVariableFeatures(object = myeloid, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeaturePlot(myeloid)
+myeloid <- ScaleData(object = myeloid, features = VariableFeatures(object = myeloid), vars.to.regress = c("nCount_RNA", "percent.mt"))
+myeloid <- RunPCA(object = myeloid,
+                features =  VariableFeatures(object = myeloid),
+                dims = 1:50)
+gc()
+ElbowPlot(myeloid,ndims = 50)
+```
+
+```{r}
+myeloid <- RunHarmony(object = myeloid, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+myeloid <- RunUMAP(myeloid,dims = 1:20,reduction = "harmony")
+myeloid <- RunTSNE(myeloid,dims = 1:20,reduction = "harmony")
+
+myeloid <- FindNeighbors(myeloid, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  myeloid <- FindClusters(object = myeloid, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+myeloid <- JoinLayers(myeloid)
+```
+
+```{r}
+DimPlot(myeloid, group.by = "RNA_snn_res.0.3",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+DimPlot(myeloid, group.by = "annotation_V1",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+save(myeloid, file = paste0(outdir,"myeloid_V1p5.RDS"))
+```
+

@@ -1,0 +1,304 @@
+---
+title: "1-2-2_merge_new_whole"
+output: html_document
+date: "2025-04-16"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "RDS/"
+outdir <- "prelim_analysis/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+The goal:
+1) merge new lymphocyte compartment and new immune cell dataset.
+2) calculate subpopulation profile
+
+## load objects
+
+```{r}
+T_cells <- readRDS(paste0(indir,"T_cells_V1p4.Rds"))
+myeloid <- readRDS(file = paste0(indir,"myeloid_V1p5.RDS"))
+lymphocytes <- readRDS(file = paste0(indir,"lymphocytes_V1p3.RDS"))
+```
+
+## merge subsets
+
+### create new lymphocyte subset
+
+```{r}
+table(lymphocytes$annotation_V1)
+```
+
+
+```{r}
+non_T <- subset(lymphocytes, subset = annotation_V1 %in% c("L0: NK","L7: B cells","L10: ILC3"))
+```
+
+```{r}
+DimPlot(non_T)
+```
+
+```{r}
+lymphocytes <- merge(T_cells, non_T)
+lymphocytes <- JoinLayers(lymphocytes)
+```
+
+```{r}
+lymphocytes <- FindVariableFeatures(object = lymphocytes, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(lymphocytes) <-  VariableFeatures(lymphocytes)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(lymphocytes))]
+VariableFeaturePlot(lymphocytes)
+lymphocytes <- ScaleData(object = lymphocytes, features = VariableFeatures(object = lymphocytes), vars.to.regress = c("nCount_RNA", "percent.mt"))
+lymphocytes <- RunPCA(object = lymphocytes,
+                features =  VariableFeatures(object = lymphocytes),
+                dims = 1:50)
+gc()
+ElbowPlot(lymphocytes,ndims = 50)
+
+lymphocytes <- RunHarmony(object = lymphocytes, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+lymphocytes <- RunUMAP(lymphocytes,dims = 1:30,reduction = "harmony")
+lymphocytes <- RunTSNE(lymphocytes,dims = 1:30,reduction = "harmony")
+
+lymphocytes <- FindNeighbors(lymphocytes, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  lymphocytes <- FindClusters(object = lymphocytes, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+lymphocytes <- JoinLayers(lymphocytes)
+```
+
+
+```{r}
+DimPlot(lymphocytes, group.by = "annotation_V1")+scale_color_manual(values = pal)
+DimPlot(lymphocytes, group.by = "RNA_snn_res.0.8",label = T)+scale_color_manual(values = pal)
+
+```
+```{r}
+Idents(lymphocytes) <- "RNA_snn_res.0.8"
+FeaturePlot(lymphocytes, features = "Cd3e",label = T)
+FeaturePlot(lymphocytes, features = "Cd4",label = T)
+FeaturePlot(lymphocytes, features = "Cd8a",label = T)
+FeaturePlot(lymphocytes, features = "Klra1",label = T)
+```
+
+```{r}
+saveRDS(lymphocytes, file = paste0(indir,"lymphocytes_V1p4.RDS"))
+```
+
+```{r}
+lymphocytes <- readRDS(paste0(indir,"lymphocytes_V1p4.RDS"))
+```
+
+```{r}
+colnames(lymphocytes@meta.data)
+```
+
+```{r}
+table(lymphocytes$compartment)
+```
+
+
+### check myeloid cluster quality and labels
+
+
+```{r}
+DimPlot(myeloid, group.by = "annotation_V1")+scale_color_manual(values = pal)
+```
+
+```{r}
+table(myeloid$annotation_V1)
+```
+
+
+<!-- ```{r} -->
+<!-- myeloid$annotation_V1 <- factor(myeloid$annotation_V1, levels = c("M0: mo-Mac1", -->
+<!--                                                                   "M1: mo-Mac2", -->
+<!--                                                                   "M2: Mac-like/artifact-like", -->
+<!--                                                                   "M3: mo-DC/monocytes", -->
+<!--                                                                   "M4: Neutrophil-like", -->
+<!--                                                                   "M5: migDC", -->
+<!--                                                                   "M6: proliferating mo-Mac", -->
+<!--                                                                   "M7: cDC1/DC2", -->
+<!--                                                                   "M8: mo-Mac3", -->
+<!--                                                                   "M9: mo-Mac4", -->
+<!--                                                                   "M10: granulocytes")) -->
+<!-- ``` -->
+
+
+```{r}
+myeloid@meta.data <- myeloid@meta.data %>% mutate(
+  annotation_V1 = case_match(
+    annotation_V1,
+    "M9: mast cells" ~ "M8: mast cells",
+    .default = annotation_V1
+  )
+)
+
+```
+
+
+```{r}
+DimPlot(myeloid, group.by = "annotation_V1",label = T, repel = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+saveRDS(myeloid, file = paste0(indir,"myeloid_V1p5.RDS"))
+```
+
+
+### merge whole
+
+```{r}
+whole <- merge(myeloid, lymphocytes)
+whole <- JoinLayers(whole)
+```
+
+```{r}
+table(whole$annotation_V1)
+```
+
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:30,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:30,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+
+```{r}
+g <- DimPlot(whole, group.by = "annotation_V1",label = T, repel = T)+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap.pdf"), plot = g, width = 10, height = 7)
+
+g <- DimPlot(whole, group.by = "annotation_V1",label = F, repel = T, split.by = "orig.ident")+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_split.pdf"), plot = g, width = 15, height = 7)
+```
+```{r}
+saveRDS(whole, file = paste0(outdir,"whole_V1p6.RDS"))
+```
+
+## perform calculation over subpopulation profile
+
+```{r}
+sample_imm_size = data.frame(table(whole$orig.ident))
+sample_imm_size <- sample_imm_size %>% dplyr::rename(n_immune = Freq, orig.ident = Var1)
+```
+
+```{r}
+clust_prop <- whole@meta.data %>% group_by(annotation_V1,compartment,orig.ident) %>% summarise(n_subpop = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(percentage = 100*n_subpop/sum(n_subpop))
+
+ML_ratio <- clust_prop %>% group_by(orig.ident, compartment) %>% summarise(n_compartment = sum(n_subpop)) %>% ungroup() %>% group_by(orig.ident) %>% mutate(myeloid_lymphocyte_ratio = n_compartment[compartment=="Myeloid"]/n_compartment[compartment=="Lymphocytes"])
+```
+
+```{r}
+g <- ggplot(ML_ratio)+
+  geom_bar(aes(x = orig.ident, y = myeloid_lymphocyte_ratio, fill = orig.ident), stat = "identity", position = "dodge")+
+  theme_classic()+
+  scale_fill_manual("condition",values = c("KO_HC" = "darkblue", "WT_HC" = "red3"))+
+  xlab("Condition")+
+  ylab("myeloid/lymphocyte ratio")+
+  geom_hline(yintercept = c(2,4),linetype = 2, color = "grey70")
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_ML-ratio.pdf"), plot = g, width = 7, height = 7)
+```
+
+
+```{r}
+# visualize lymphocytes
+
+clust_prop_grouped <- clust_prop %>% dplyr::filter(compartment == "Lymphocytes") 
+
+ratio <- clust_prop_grouped %>% group_by(annotation_V1) %>% reframe(FC = log2(percentage[orig.ident == "KO_HC"]/percentage[orig.ident == "WT_HC"]))
+
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = percentage, fill = annotation_V1))+
+  geom_bar(stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~annotation_V1, scales = "free")
+g3  
+ggsave(filename = paste0(outdir,"lymphocyte_percentage_bar.pdf"), plot = g3, width = 8, height = 5)
+  
+g4 <- ggplot(ratio, aes( x = reorder(annotation_V1, -FC), y = FC))+
+  geom_bar(aes(fill = annotation_V1),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 % in KO v.s. WT immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  geom_hline(yintercept = c(-1,1), color = "red3", linetype = 3)
+g4
+ggsave(filename = paste0(outdir,"lymphocyte_log2_percentage_bar.pdf"), plot = g4, width = 6, height = 4)
+```
+
+
+```{r}
+# visualize myeloid
+
+clust_prop_grouped <- clust_prop %>% dplyr::filter(compartment == "Myeloid") 
+
+ratio <- clust_prop_grouped %>% group_by(annotation_V1) %>% reframe(FC = log2(percentage[orig.ident == "KO_HC"]/percentage[orig.ident == "WT_HC"]))
+
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = percentage, fill = annotation_V1))+
+  geom_bar(stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~annotation_V1, scales = "free")
+g3  
+ggsave(filename = paste0(outdir,"Myeloid_percentage_bar.pdf"), plot = g3, width = 8, height = 5)
+  
+g4 <- ggplot(ratio, aes( x = reorder(annotation_V1, -FC), y = FC))+
+  geom_bar(aes(fill = annotation_V1),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 % in KO v.s. WT immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  geom_hline(yintercept = c(-1,1), color = "red3", linetype = 3)
+g4
+ggsave(filename = paste0(outdir,"Myeloid_log2_percentage_bar.pdf"), plot = g4, width = 6, height = 4)
+```
+
+

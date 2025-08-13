@@ -1,0 +1,308 @@
+---
+title: "June-1-5_moMac_functional"
+output: html_document
+date: "2025-06-09"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(msigdbr)
+library(fgsea)
+library(org.Mm.eg.db)
+library(data.table)
+library(ComplexHeatmap)
+library(circlize)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+pal2 <- pal[c(1:8,10,13:14,16:20, 22:25,27:30, 33:35 )] # use pal2
+```
+
+```{r}
+indir <- "RDS/"
+outdir <- "macrophage_functional_analysis_V1p3-2/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined",outdir){
+  if(!dir.exists(outdir)) {dir.create(outdir)}
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    title(main = i)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(outdir,i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  } # need to add name of gene sets to the file name
+   return(fgsea_res)
+}
+```
+
+### calculate mo-Mac
+
+```{r}
+myeloid <- readRDS(file = paste0(indir,"myeloid_V1p3-2.RDS"))
+```
+
+```{r}
+table(myeloid$annotation_V1)
+```
+
+```{r}
+# keep only macrophage for DE; exclude proliferating mo-Mac
+
+mph <- subset(myeloid, subset = annotation_V1 %in% c("M0: Mo-Mac1","M1: Mo-Mac2","M11: Mo-Mac6","M12: Mo-Mac7","M2: Mo-Mac3","M4: Mo-Mac4","M7: Mo-Mac5"))
+```
+
+```{r}
+table(mph$annotation_V1)
+```
+
+```{r}
+Idents(mph) <- "annotation_V1"
+markers <- FindAllMarkers(mph)
+```
+
+### run fgsea
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+# Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+# Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+#CP_df <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP")
+GO_BP_df <- msigdbr(species = "Mus musculus", category = "C5",subcategory = "GO:BP")
+GO_CC_df <- msigdbr(species = "Mus musculus", category = "C5",subcategory = "GO:CC")
+GO_MF_df <- msigdbr(species = "Mus musculus", category = "C5",subcategory = "GO:MF")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+# fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+#fgsea_sets_CP <- CP_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_GOBP <- GO_BP_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_GOCC <- GO_CC_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_GOMF <- GO_MF_df %>% split(x = .$gene_symbol, f = .$gs_name)
+# fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+```
+
+#### Hallmarks
+
+```{r run fgsea over gene sets}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Hallmark/","fgsea_mac_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+#### KEGG
+
+```{r run fgsea over gene sets}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+Hallmark_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"KEGG/","fgsea_mac_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+#### REACTOME
+
+```{r}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+react_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = react_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% react_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Reactome/","fgsea_mac_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+#### GOBP
+
+```{r}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_GOBP,mode = "simple",outdir = paste0(outdir,"GOBP/"))
+
+react_vector <- names(fgsea_sets_GOBP)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = react_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% react_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"GOBP/","fgsea_mac_GOBP_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+#### GOCC
+
+```{r}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_GOCC,mode = "simple",outdir = paste0(outdir,"GOCC/"))
+
+react_vector <- names(fgsea_sets_GOCC)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = react_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% react_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"GOCC/","fgsea_mac_GOCC_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+#### GOMF
+
+```{r}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_GOMF,mode = "simple",outdir = paste0(outdir,"GOMF/"))
+
+react_vector <- names(fgsea_sets_GOMF)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = react_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% react_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"GOMF/","fgsea_mac_GOMF_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+### mo-Mac marker heatmap
+
+
+```{r}
+mph_selected <- markers %>% group_by(cluster) %>% slice_max(order_by = avg_log2FC*pct.1, n = 10)
+```
+
+```{r}
+mph_bulk <- AggregateExpression(mph,features = mph_selected$gene, return.seurat = T, group.by = c("annotation_V1","orig.ident"))
+```
+
+```{r}
+table(mph_bulk$orig.ident)
+```
+
+```{r}
+mph_bulk$annotation_V1 <- factor(mph_bulk$annotation_V1, levels = paste0("g Mo-Mac",1:7))
+mph_bulk$sample <- rep(c("WT_HC","KO_HC"),7)
+mph_bulk$sample <- factor(mph_bulk$sample, levels = c("WT_HC","KO_HC"))
+mph_pal <- pal2[13:19]
+names(mph_pal) <- unique(unname(mph_bulk$annotation_V1))
+col = list(
+  Cell_type = mph_pal,
+  Sample = c("WT_HC"="red3", "KO_HC" = "darkblue")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(mph_bulk$annotation_V1), Sample = unname(mph_bulk$sample),
+  col = col
+)
+mat <-  GetAssayData(mph_bulk,layer = "scale.data")
+
+Heatmap(mat,name = "scaled expression",top_annotation = ha,cluster_rows = T,cluster_columns = F,
+        column_order = c("g Mo-Mac1_M0_WT-HC","g Mo-Mac1_M0_KO-HC",
+                         "g Mo-Mac2_M1_WT-HC", "g Mo-Mac2_M1_KO-HC",
+                         "g Mo-Mac3_M2_WT-HC","g Mo-Mac3_M2_KO-HC",
+                         "g Mo-Mac4_M4_WT-HC","g Mo-Mac4_M4_KO-HC",
+                         "g Mo-Mac5_M7_WT-HC","g Mo-Mac5_M7_KO-HC",
+                         "g Mo-Mac6_M11_WT-HC","g Mo-Mac6_M11_KO-HC",
+                         "g Mo-Mac7_M12_WT-HC","g Mo-Mac7_M12_KO-HC"),
+        show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+
+```
+
+```{r}
+pdf(paste0("V1p3_myeloid_plots/mo-Mac_marker_Heatmap.pdf"), width = 6, height = 8)
+Heatmap(mat,name = "scaled expression",top_annotation = ha,cluster_rows = T,cluster_columns = F,
+        column_order = c("g Mo-Mac1_M0_WT-HC","g Mo-Mac1_M0_KO-HC",
+                         "g Mo-Mac2_M1_WT-HC", "g Mo-Mac2_M1_KO-HC",
+                         "g Mo-Mac3_M2_WT-HC","g Mo-Mac3_M2_KO-HC",
+                         "g Mo-Mac4_M4_WT-HC","g Mo-Mac4_M4_KO-HC",
+                         "g Mo-Mac5_M7_WT-HC","g Mo-Mac5_M7_KO-HC",
+                         "g Mo-Mac6_M11_WT-HC","g Mo-Mac6_M11_KO-HC",
+                         "g Mo-Mac7_M12_WT-HC","g Mo-Mac7_M12_KO-HC"),
+        show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+

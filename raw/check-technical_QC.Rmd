@@ -1,0 +1,33 @@
+---
+title: "check-technical_QC"
+output: html_document
+date: "2025-04-14"
+---
+
+```{r}
+library(flowCore)
+library(tidyverse)
+
+library(flowCore) #BiocManageer
+library(CATALYST)
+library(stringr)
+library(RColorBrewer)
+library(ggplot2)
+library(ggrastr)
+# library(FastPG) #intsall from git
+library(dplyr)
+library(RefPlus)# RefPlus can't be installed via BiocManager due to a bug; builts from git repo
+# R CMD INSTALL RefPlus_1.74.0.tar (terminal) OR
+# install.packages(path_to_file, repos = NULL, type="source")
+# BiocManager::install(c("affy","affyPLM"))
+library(minpack.lm)#
+# install.packages("Cairo")
+source("mini-batch-testing/utility_functions.R")
+```
+
+```{r}
+outdir <- "QC-tests/"
+if(!dir.exists(outdir)) dir.create(outdir)
+```
+
+## check data with manual gating

@@ -1,0 +1,235 @@
+---
+title: "1-2-3_functional_analysis_myeloid"
+output: html_document
+date: "2025-04-29"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(msigdbr)
+library(fgsea)
+library(org.Mm.eg.db)
+library(data.table)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "RDS/"
+outdir <- "T_functional_analysis_V1p4/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+
+```{r}
+fgsea_res <- function(cell_type_vector, DE_genes, choose_n = 100, choose_tops = F,gene_set = fgsea_sets_Hallmark,mode = "combined",outdir){
+  if(!dir.exists(outdir)) {dir.create(outdir)}
+  fgsea_res <- list()
+  #DE_selected <- DE_genes %>% group_by(cluster) %>% filter(p_val_adj < 0.05 & abs(avg_log2FC) > 1 & pct.1 > 0.1) %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  DE_selected <- DE_genes %>% mutate(metric = sign(avg_log2FC)*(-log10(p_val_adj))) %>% filter(!is.infinite(metric))
+  if (mode == "simple"){
+    DE_selected <- DE_genes %>% mutate(metric = avg_log2FC) %>% filter(!is.infinite(metric))
+  }
+  for (i in cell_type_vector) {
+    DE <- DE_selected[DE_selected$cluster == i,] %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    if (choose_tops){
+      DE_top <- DE %>% group_by(cluster) %>% slice_max(order_by = metric, n = choose_n)
+      DE_tail <- DE %>% group_by(cluster) %>% slice_min(order_by = metric, n = choose_n)
+      DE <- rbind(DE_top,DE_tail)
+    }
+    DE <- DE %>% arrange(desc(metric)) %>% dplyr::select(gene,metric)
+    rankings <- DE$metric
+    names(rankings) <- DE$gene
+    #print(rankings)
+    plot(rankings)
+    title(main = i)
+    fgseaRes <- fgsea(gene_set, stats = rankings,nPermSimple = 10000)
+    fgseaResTidy <- fgseaRes %>%
+      as_tibble() %>% filter(padj < 0.05 ) %>%
+      arrange(desc(NES))
+  fgsea_res[[i]] <- fgseaResTidy
+  fwrite(fgseaResTidy, file=paste0(outdir,i,"_fgsea.tsv"), sep="\t", sep2=c("", " ", ""))
+  } # need to add name of gene sets to the file name
+   return(fgsea_res)
+}
+```
+
+### calculate T cell markers
+
+```{r}
+T_cells <- readRDS(paste0(indir,"T_cells_V1p4.Rds"))
+```
+
+```{r}
+table(T_cells$annotation_V1)
+```
+
+```{r}
+# keep only macrophage for DE; exclude proliferating mo-Mac
+T_sub <- subset(T_cells, subset = annotation_V1 != c("c8: Proliferating"))
+```
+
+```{r}
+table(T_sub$annotation_V1)
+```
+
+```{r}
+T_sub@meta.data <- T_sub@meta.data %>% mutate(annotation_V1 = case_match(
+  annotation_V1,
+  "c4: Tem/ex" ~ "c4: Tem_ex",
+  .default = annotation_V1
+))
+```
+
+```{r}
+Idents(T_sub) <- "annotation_V1"
+markers <- FindAllMarkers(T_sub)
+```
+### run fgsea
+
+```{r}
+H_df<- msigdbr(species = "Mus musculus", category = "H")
+# Imm_df <- msigdbr(species = "Mus musculus", category = "C7",subcategory = "IMMUNESIGDB")
+# Celltype_df <- msigdbr(species = "Mus musculus", category = "C8")
+C2_KEGG <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:KEGG")
+C2_React <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP:REACTOME")
+#CP_df <- msigdbr(species = "Mus musculus", category = "C2",subcategory = "CP")
+GO_BP_df <- msigdbr(species = "Mus musculus", category = "C5",subcategory = "GO:BP")
+GO_CC_df <- msigdbr(species = "Mus musculus", category = "C5",subcategory = "GO:CC")
+GO_MF_df <- msigdbr(species = "Mus musculus", category = "C5",subcategory = "GO:MF")
+
+fgsea_sets_Hallmark <- H_df %>% split(x = .$gene_symbol, f = .$gs_name)
+# fgsea_sets_Imm <- Imm_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_KEGG <- C2_KEGG %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_REACT <- C2_React %>% split(x = .$gene_symbol, f = .$gs_name)
+#fgsea_sets_CP <- CP_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_GOBP <- GO_BP_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_GOCC <- GO_CC_df %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_GOMF <- GO_MF_df %>% split(x = .$gene_symbol, f = .$gs_name)
+# fgsea_sets_Celltype <- Celltype_df %>% split(x = .$gene_symbol, f = .$gs_name)
+```
+
+#### Hallmarks
+
+```{r run fgsea over gene sets}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_Hallmark,mode = "simple",outdir = paste0(outdir,"Hallmark/"))
+
+Hallmark_vector <- names(fgsea_sets_Hallmark)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Hallmark/","fgsea_T_Hallmark_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+#### KEGG
+
+```{r run fgsea over gene sets}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_KEGG,mode = "simple",outdir = paste0(outdir,"KEGG/"))
+
+Hallmark_vector <- names(fgsea_sets_KEGG)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = Hallmark_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% Hallmark_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"KEGG/","fgsea_T_KEGG_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+#### REACTOME
+
+```{r}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_REACT,mode = "simple",outdir = paste0(outdir,"Reactome/"))
+
+react_vector <- names(fgsea_sets_REACT)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = react_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% react_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"Reactome/","fgsea_T_Reactome_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+#### GOBP
+
+```{r}
+fgsea_result <- fgsea_res(as.character(unique(markers$cluster)),markers,gene_set = fgsea_sets_GOBP,mode = "simple",outdir = paste0(outdir,"GOBP/"))
+
+react_vector <- names(fgsea_sets_GOBP)
+celltype_vector <- as.character(unique(markers$cluster))
+table_res <- data.frame(pathway = react_vector)
+for (i in celltype_vector){
+  table_tmp <- fgsea_result[[i]]
+  table_celltype <- table_tmp[table_tmp$pathway %in% react_vector,c("pathway","NES")]
+  colnames(table_celltype) <- c("pathway",i)
+  table_res <- full_join(table_res,table_celltype,by = "pathway")
+}
+
+table_res[is.na(table_res)] = 0
+table_res <- table_res[apply(table_res[,2:(length(unique(markers$cluster))+1)],1,var) != 0,]
+
+write.table(table_res,file = paste0(outdir,"GOBP/","fgsea_T_GOBP_consolidated_filtered.tsv") ,sep = "\t",row.names = F,quote = F)
+```
+
+
+
+### compare gene expression condition-wise
+
+```{r}
+Idents(mph) <- "orig.ident"
+DEG <- FindMarkers(mph, ident.1 = "KO_HC",ident.2 = "WT_HC")
+```
+
+```{r}
+DEG$gene <- rownames(DEG)
+```
+
+```{r}
+ggplot(DEG,aes(x = avg_log2FC, y = -log10(p_val_adj)))+
+  geom_point(aes(size = abs(pct.1-pct.2), color = abs(avg_log2FC)))+
+  ggrepel::geom_text_repel(aes(label = ifelse(gene %in% DEG$gene[abs(DEG$avg_log2FC) > 1 & DEG$p_val_adj < 0.01], gene, "")))+
+  scale_color_gradientn(colors = c("grey90","red2","red3"))+
+  theme_classic()
+```
+
+### compare gene expression signature of Ashraf's data
+
+

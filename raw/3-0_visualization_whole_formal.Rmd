@@ -1,0 +1,409 @@
+---
+title: "3-0_visualization_whole_formal"
+output: html_document
+date: "2025-05-07"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(mascarade)
+library(data.table)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "darkblue"
+pal[19] <- colors()[60]
+pal[13] <- "turquoise4"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+Note: since proportion information relies on whole dataset, proportion plots will be made here. An easier way is to export the metadata for visualization and manipulation
+
+```{r}
+indir <- "RDS/"
+outdir <- "formal-visualization/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+## load objects
+
+```{r}
+T_cells <- readRDS(paste0(indir,"T_cells_V1p4.Rds"))
+myeloid <- readRDS(file = paste0(indir,"myeloid_V1p5.RDS"))
+lymphocytes <- readRDS(file = paste0(indir,"lymphocytes_V1p4.RDS"))
+whole <- readRDS(file = paste0(indir,"whole_V1p6.RDS"))
+```
+
+## create umap with annotation
+
+```{r}
+table(whole$annotation_V1)
+```
+```{r}
+# add an intermediate layer
+
+whole@meta.data <- whole@meta.data %>% mutate(
+  cell_type = case_match(
+    annotation_V1,
+    "c0: Naive CD8 T" ~ "CD8 T cells",
+    "c1: NKT-like" ~ "NKT",
+    "c2: Treg" ~ "CD4 T cells",
+    "c3: Th2" ~ "CD4 T cells",
+    "c4: Tem/ex" ~ "CD8 T cells",
+    "c5: Th" ~ "CD4 T cells",
+    "c6: Tex" ~ "CD4 T cells",
+    "c7: gdT" ~ "gdT",
+    "c8: Proliferating" ~ "Proliferating T cells",
+    "L0: NK" ~ "NK",
+    "L10: ILC3" ~ "ILC",
+    "L7: B cells" ~ "B cells",
+    "M0: mo-Mac1" ~ "mo-Mac",
+    "M1: mo-Mac2" ~ "mo-Mac",
+     "M7: cDC1_DC2" ~ "DC",
+    "M8: mast cells" ~ "mast cells",
+    "M2: Neutrophil" ~ "Neutrophil",
+    "M3: cDC2" ~ "DC",
+    "M4: mo-Mac3" ~ "mo-Mac",
+    "M5: migDC" ~ "DC",
+    "M6: proliferating mo-Mac" ~ "Proliferating mo-Mac",
+  ),
+  label = case_match(
+    annotation_V1,
+    "c0: Naive CD8 T" ~ "c0",
+    "c1: NKT-like" ~ "c1",
+    "c2: Treg" ~ "c2",
+    "c3: Th2" ~ "c3",
+    "c4: Tem/ex" ~ "c4",
+    "c5: Th" ~ "c5",
+    "c6: Tex" ~ "c6",
+    "c7: gdT" ~ "c7",
+    "c8: Proliferating" ~ "c8",
+    "L0: NK" ~ "L0",
+    "L10: ILC3" ~ "L10",
+    "L7: B cells" ~ "L7",
+    "M0: mo-Mac1" ~ "M0",
+    "M1: mo-Mac2" ~ "M1",
+     "M7: cDC1_DC2" ~ "M7",
+    "M8: mast cells" ~ "M8",
+    "M2: Neutrophil" ~ "M2",
+    "M3: cDC2" ~ "M3",
+    "M4: mo-Mac3" ~ "M4",
+    "M5: migDC" ~ "M5",
+    "M6: proliferating mo-Mac" ~ "M6"
+  )
+)
+whole$cell_type = factor(whole$cell_type, levels = c("CD8 T cells",
+                                                     "NKT","CD4 T cells",
+                                                     "gdT",
+                                                     "Proliferating T cells",
+                                                     "NK",
+                                                     "ILC",
+                                                     "B cells",
+                                                     "mo-Mac",
+                                                     "Neutrophil",
+                                                     "DC",
+                                                     "Proliferating mo-Mac",
+                                                     "mast cells"))
+
+```
+
+```{r}
+whole$orig.ident <- factor(whole$orig.ident, levels = c("WT_HC","KO_HC"))
+```
+
+```{r}
+saveRDS(whole, file = paste0(outdir,"whole_V1p6.RDS"))
+```
+
+### by annotation
+
+```{r}
+# mascarade does not work well for whole
+
+g <- DimPlot(whole, group.by = "label",label = T, repel = T)+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap.pdf"), plot = g, width = 10, height = 7)
+g <- DimPlot(whole, group.by = "annotation_V1",label = F, repel = T)+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_for-label.pdf"), plot = g, width = 10, height = 7)
+
+
+g <- DimPlot(whole, group.by = "label",label = T, repel = T, split.by = "orig.ident")+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_split.pdf"), plot = g, width = 15, height = 7)
+g <- DimPlot(whole, group.by = "annotation_V1",label = F, repel = T)+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_split_for-label.pdf"), plot = g, width = 10, height = 7)
+```
+
+```{r}
+maskTable <- generateMask(dims=whole@reductions$umap@cell.embeddings, 
+                          clusters=whole$annotation_V1)
+data <- data.table(whole@reductions$umap@cell.embeddings, 
+                   cluster=whole$annotation_V1,
+                   whole@meta.data)
+centers <- data %>% 
+  dplyr::group_by(cluster) %>% 
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2)) 
+centers.2 <- data %>%
+  dplyr::group_by(label) %>%
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2))
+
+
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  geom_text(data = centers.2, aes(label=label), size = 3.5, color = "black") +
+    scale_color_manual(values = pal)+
+    coord_fixed() + 
+    theme_classic()+facet_wrap(~orig.ident)+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 2))) 
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_split_mascarade.pdf"), plot = g, width = 15, height = 7)
+```
+
+```{r}
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  ggrepel::geom_text_repel(data = centers.2, aes(label=label), size = 5, color = "black",min.segment.length = unit(0, 'lines'),force = 5, label.padding = 5,max.overlaps = Inf,direction = "both") +
+    scale_color_manual(values = pal)+
+    coord_fixed() + 
+    theme_classic()+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 2))) 
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_mascarade.pdf"), plot = g, width = 7, height = 7)
+```
+
+```{r}
+p1 <- DotPlot(whole, group.by = "annotation_V1",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Clec10a","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Gata3","Rorc","Tyrobp","Pdcd1"))+scale_color_gradientn(colors = c("grey90","red2","red3"))+ RotatedAxis()+coord_flip()
+p2 <- DotPlot(whole, group.by = "label",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Clec10a","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Gata3","Rorc","Tyrobp","Pdcd1"))+scale_color_gradientn(colors = c("grey90","red2","red3"))+ RotatedAxis()+coord_flip()
+g <- gridExtra::grid.arrange(grobs = list(p1,p2),nrow = 2)
+ggsave(filename = paste0(outdir,"Supp_Whole_Dotplot_annotation.pdf"), plot = g, units = "cm",height = 24,width = 20)
+```
+
+### by cell type
+
+```{r}
+maskTable <- generateMask(dims=whole@reductions$umap@cell.embeddings, 
+                          clusters=whole$cell_type)
+data <- data.table(whole@reductions$umap@cell.embeddings, 
+                   cluster=whole$cell_type,
+                   whole@meta.data)
+centers <- data %>% 
+  dplyr::group_by(cluster) %>% 
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2)) 
+centers.2 <- data %>%
+  dplyr::group_by(label) %>%
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2))
+
+```
+
+```{r}
+data$orig.ident <- factor(data$orig.ident, levels = c("WT_HC","KO_HC"))
+```
+
+
+```{r}
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  geom_text(data = centers, aes(label=cluster), size = 3.5, color = "black") +
+    scale_color_manual(values = pal[c(1:8,10:15)])+
+    coord_fixed() + 
+    theme_classic()+facet_wrap(~orig.ident)+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 2))) 
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_cell-type_umap_split_mascarade.pdf"), plot = g, width = 15, height = 7)
+```
+
+```{r}
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  ggrepel::geom_text_repel(data = centers, aes(label=cluster), size = 5, color = "black",min.segment.length = unit(0, 'lines'),force = 5, label.padding = 5,max.overlaps = Inf,direction = "both") +
+    scale_color_manual(values = pal[c(1:8,10:15)])+
+    coord_fixed() + 
+    theme_classic()+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 2))) 
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_cell-type_umap_mascarade.pdf"), plot = g, width = 7, height = 7)
+```
+```{r}
+gene_of_interests <- t(as.matrix(whole[["RNA"]]$data[c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Cd200r3","Mki67","Cd3e","Ncr1"),]))
+```
+
+```{r}
+data <- cbind(data, gene_of_interests)
+```
+
+```{r}
+ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color= as.numeric(unlist(data[,"Adgre1"]))), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  #ggrepel::geom_text_repel(data = centers, aes(label=cluster), size = 5, color = "black",min.segment.length = unit(0, 'lines'),force = 5, label.padding = 5,max.overlaps = Inf,direction = "both") +
+    scale_colour_gradientn(colors = c("grey90", "red", "red3"))+
+    coord_fixed() + 
+    theme_classic()
+```
+
+
+```{r}
+data <- as.data.frame(data)
+plts <- lapply(c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Cd200r3","Mki67","Cd3e","Ncr1"),function(g){
+  ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color= as.numeric(unlist(data[,g]))), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  #ggrepel::geom_text_repel(data = centers, aes(label=cluster), size = 5, color = "black",min.segment.length = unit(0, 'lines'),force = 5, label.padding = 5,max.overlaps = Inf,direction = "both") +
+    scale_colour_gradientn("expression",colors = c("grey90", "red", "red3"))+
+    coord_fixed() + 
+    theme_classic()+
+    ggtitle(g)
+})
+g <- gridExtra::grid.arrange(grobs = plts,nrow = 3)
+ggsave(filename = paste0(outdir,"Whole_FeaturePlot_cell-type-markers_mascarade.pdf"), plot = g, units = "cm",height = 30,width = 30)
+```
+
+
+```{r}
+p1 <- DotPlot(whole, group.by = "cell_type",features = c("Adgre1","S100a8","Flt3","Xcr1","Sirpa","Clec10a","Cd200r3","Tpsb2","Mki67","Cd3e","Ncr1","Gata3","Rorc","Tyrobp","Cd19"))+scale_color_gradientn(colors = c("grey90","red2","red3"))+ RotatedAxis()+coord_flip()
+ggsave(filename = paste0(outdir,"Supp_Whole_Dotplot_cell-type.pdf"), plot = p1, units = "cm",height = 12,width = 15)
+```
+
+
+## perform calculation over subpopulation profile
+
+```{r}
+sample_imm_size = data.frame(table(whole$orig.ident))
+sample_imm_size <- sample_imm_size %>% dplyr::rename(n_immune = Freq, orig.ident = Var1)
+```
+
+```{r}
+clust_prop <- whole@meta.data %>% group_by(annotation_V1,compartment,orig.ident) %>% summarise(n_subpop = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(percentage = 100*n_subpop/sum(n_subpop))
+
+ML_ratio <- clust_prop %>% group_by(orig.ident, compartment) %>% summarise(n_compartment = sum(n_subpop)) %>% ungroup() %>% group_by(orig.ident) %>% mutate(myeloid_lymphocyte_ratio = n_compartment[compartment=="Myeloid"]/n_compartment[compartment=="Lymphocytes"])
+```
+
+```{r}
+g <- ggplot(ML_ratio)+
+  geom_bar(aes(x = orig.ident, y = myeloid_lymphocyte_ratio, fill = orig.ident), stat = "identity", position = "dodge")+
+  theme_classic()+
+  scale_fill_manual("condition",values = c("KO_HC" = "darkblue", "WT_HC" = "red3"))+
+  xlab("Condition")+
+  ylab("myeloid/lymphocyte ratio")+
+  geom_hline(yintercept = c(2,4),linetype = 2, color = "grey70")
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_ML-ratio.pdf"), plot = g, width = 7, height = 7)
+```
+
+```{r}
+ct_prop <- whole@meta.data %>% group_by(cell_type,compartment,orig.ident) %>% summarise(n_ct = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(percentage = 100*n_ct/sum(n_ct))
+
+NL_ratio <- ct_prop %>% filter(cell_type == "Neutrophil" | compartment == "Lymphocytes") %>% group_by(orig.ident,compartment) %>% summarise(n_compartment = sum(n_ct)) %>% ungroup() %>% group_by(orig.ident) %>% mutate(neu_lymphocyte_ratio = n_compartment[compartment=="Myeloid"]/n_compartment[compartment=="Lymphocytes"])
+
+g <- ggplot(NL_ratio)+
+  geom_bar(aes(x = orig.ident, y = neu_lymphocyte_ratio, fill = orig.ident), stat = "identity", position = "dodge")+
+  theme_classic()+
+  scale_fill_manual("condition",values = c("KO_HC" = "darkblue", "WT_HC" = "red3"))+
+  xlab("Condition")+
+  ylab("neutrophil/lymphocyte ratio")#+geom_hline(yintercept = c(2,4),linetype = 2, color = "grey70")
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_NL-ratio.pdf"), plot = g, width = 7, height = 7)
+```
+
+
+```{r}
+# visualize lymphocytes
+
+clust_prop_grouped <- clust_prop %>% dplyr::filter(compartment == "Lymphocytes") 
+
+ratio <- clust_prop_grouped %>% group_by(annotation_V1) %>% reframe(FC = log2(percentage[orig.ident == "KO_HC"]/percentage[orig.ident == "WT_HC"]))
+
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = percentage, fill = annotation_V1))+
+  geom_bar(stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~annotation_V1, scales = "free")
+g3  
+ggsave(filename = paste0(outdir,"lymphocyte_percentage_bar.pdf"), plot = g3, width = 8, height = 5)
+
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = percentage, fill = annotation_V1))+
+  geom_bar(aes(color = orig.ident), fill = "white",stat = "identity", position = "dodge")+
+  scale_color_manual("condition",values = c("KO_HC" = "darkblue", "WT_HC" = "red3"))+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~annotation_V1, scales = "free")
+g3  
+ggsave(filename = paste0(outdir,"lymphocyte_percentage_bar_fill_by_condition.pdf"), plot = g3, width = 8, height = 5)
+
+
+  
+g4 <- ggplot(ratio, aes( x = reorder(annotation_V1, -FC), y = FC))+
+  geom_bar(aes(fill = annotation_V1),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 % in KO v.s. WT immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  geom_hline(yintercept = c(-1,1), color = "red3", linetype = 3)
+g4
+ggsave(filename = paste0(outdir,"lymphocyte_log2_percentage_bar.pdf"), plot = g4, width = 6, height = 4)
+```
+
+```{r}
+
+```
+
+
+
+
+```{r}
+# visualize myeloid
+
+clust_prop_grouped <- clust_prop %>% dplyr::filter(compartment == "Myeloid") 
+
+ratio <- clust_prop_grouped %>% group_by(annotation_V1) %>% reframe(FC = log2(percentage[orig.ident == "KO_HC"]/percentage[orig.ident == "WT_HC"]))
+
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = percentage, fill = annotation_V1))+
+  geom_bar(stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~annotation_V1, scales = "free")
+g3  
+ggsave(filename = paste0(outdir,"Myeloid_percentage_bar.pdf"), plot = g3, width = 8, height = 5)
+  
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = percentage, fill = annotation_V1))+
+  geom_bar(aes(color = orig.ident), fill = "white",stat = "identity", position = "dodge")+
+  scale_color_manual("condition",values = c("KO_HC" = "darkblue", "WT_HC" = "red3"))+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~annotation_V1, scales = "free")
+g3  
+ggsave(filename = paste0(outdir,"Myeloid_percentage_bar_fill_by_condition.pdf"), plot = g3, width = 8, height = 5)
+
+
+
+g4 <- ggplot(ratio, aes( x = reorder(annotation_V1, -FC), y = FC))+
+  geom_bar(aes(fill = annotation_V1),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 % in KO v.s. WT immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  geom_hline(yintercept = c(-1,1), color = "red3", linetype = 3)
+g4
+ggsave(filename = paste0(outdir,"Myeloid_log2_percentage_bar.pdf"), plot = g4, width = 6, height = 4)
+```

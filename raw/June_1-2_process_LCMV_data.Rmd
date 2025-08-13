@@ -1,0 +1,413 @@
+---
+title: "June_1-2_process_LCMV_data"
+output: html_document
+date: "2025-06-02"
+---
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(miQC)
+library(SeuratWrappers)
+library(scater)
+```
+
+```{r}
+indir <- "GSE284013_RAW/"
+outdir <- "GSE284013_RDS/"
+if(!dir.exists(outdir))dir.create(outdir)
+```
+
+## process subject
+
+load only day 5 and day 45
+
+```{r}
+files <- list.files(indir)
+files <- files[grepl("day_5|day_45", files)]
+```
+
+
+```{r}
+day5 <- Read10X_h5(filename = paste0(indir,files[grep("day_5",files)]))
+
+day45 <- Read10X_h5(filename = paste0(indir,files[grep("day_45",files)]))
+```
+
+
+```{r}
+seu_list <- list(day5, day45)
+names(seu_list) <- c("day5","day45")
+
+```
+
+```{r}
+
+
+seu_list <- lapply(seu_list, function(x){
+  x <- CreateSeuratObject(x)
+  x[["percent.mt"]] <- PercentageFeatureSet(object = x, pattern = "^mt|^MT|^Mt")
+  x$log10_nCount_RNA <- log10(x$nCount_RNA+1) # add a pseudcount offset to prevent log10(0)
+  x$log10_nFeature_RNA <- log10(x$nFeature_RNA+1)
+  x$percent.ribo <- PercentageFeatureSet(x,pattern="^Rp[ls]")
+  x[["high_mito"]] <- isOutlier(x$percent.mt, type="higher", min.diff=0.5)
+  
+  x@meta.data <- x@meta.data %>% mutate(
+  mitoQC = case_when(
+    high_mito ~ "high_mito",
+    .default = "normal"
+  ))
+  
+  x <- RunMiQC(x, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.8,
+               model.slot = "flexmix_model")
+  x
+})
+```
+
+```{r}
+seu_list$day5$orig.ident <- "Day 5"
+seu_list$day45$orig.ident <- "Day 45"
+```
+
+```{r}
+whole <- merge(seu_list$day5, seu_list$day45)
+```
+
+
+```{r}
+table(whole$orig.ident)
+```
+
+"Cells with greater than 8% mitochondrial genes were excluded from analysis. Cells with more than 2,500–5,000 or less than 100–1,000 detected genes were considered outliers and excluded from downstream analyses"
+
+```{r}
+ggplot(whole@meta.data)+geom_histogram(aes(x = percent.mt,fill = miQC.keep))+facet_wrap(~orig.ident+miQC.keep, scale="free")
+```
+
+```{r}
+whole <- subset(whole, subset = percent.mt <= 8 )
+```
+
+```{r}
+ggplot(whole@meta.data)+
+  geom_point(aes(x = percent.mt, y = nFeature_RNA, color = miQC.keep))+
+  geom_hline(yintercept = c(100,1000,2500,5000))+
+  facet_wrap(~orig.ident, scale="free")
+
+ggplot(whole@meta.data)+
+  geom_point(aes(x = percent.mt, y = nCount_RNA, color = miQC.keep))+
+  geom_hline(yintercept = c(2500,5000))+
+  facet_wrap(~orig.ident, scale="free")
+```
+
+```{r}
+whole <- subset(whole, subset = nFeature_RNA <= 5000 & nFeature_RNA >= 1000)
+```
+
+
+```{r}
+ggplot(whole@meta.data)+
+  geom_point(aes(x = percent.mt, y = nFeature_RNA, color = miQC.keep))+
+  geom_hline(yintercept = c(100,1000,2500,5000))+
+  facet_wrap(~orig.ident, scale="free")
+```
+
+```{r}
+whole <- NormalizeData(object = whole, normalization.method = "LogNormalize", scale.factor = 10000)
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.6",label = T)
+DimPlot(whole, group.by = "orig.ident")
+
+```
+
+```{r}
+DotPlot(whole, group.by = "RNA_snn_res.0.6",features = c("Cd3e","Ncr1","Tyrobp","Klrb1c","Kit","Cd4","Foxp3","Gata3","Il4","Il5","Il13","Cd8a","Lef1","Ccr7","Slamf6","Ccr4","Cd69","Il2ra","Cd44","Prf1","Gzmb","Gzmk","Lag3","Pdcd1","Tox","Havcr2","Mki67"))+scale_color_gradientn(colors = c("grey90","red2","red3"))+ RotatedAxis()
+```
+
+remove c10, c5 is strange but let's see
+
+```{r}
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"), group.by = "RNA_snn_res.0.6")
+```
+
+```{r}
+whole <- subset(whole, subset = RNA_snn_res.0.6 != 10)
+```
+
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.6",label = T)
+```
+
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.6",label = T)
+DimPlot(whole, group.by = "orig.ident")
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"), split.by = "orig.ident", group.by = "RNA_snn_res.0.6")
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"),group.by = "RNA_snn_res.0.6")
+VlnPlot(whole, features=c("percent.mt"),group.by = "RNA_snn_res.0.6")
+FeaturePlot(whole, features = "log10_nFeature_RNA")
+FeaturePlot(whole, features = "percent.mt")
+```
+
+remove c9
+
+```{r}
+whole <- subset(whole, subset = RNA_snn_res.0.6 != 9)
+```
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.6",label = T)
+```
+
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:20,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:20,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.6",label = T)
+DimPlot(whole, group.by = "orig.ident")
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"), split.by = "orig.ident", group.by = "RNA_snn_res.0.6")
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"),group.by = "RNA_snn_res.0.6")
+VlnPlot(whole, features=c("percent.mt"),group.by = "RNA_snn_res.0.6")
+FeaturePlot(whole, features = "log10_nFeature_RNA")
+FeaturePlot(whole, features = "percent.mt")
+FeaturePlot(whole, features = "percent.ribo")
+```
+
+trim again by 5%
+
+```{r}
+whole <- subset(whole, subset = percent.mt <= 5)
+```
+
+```{r}
+whole <- FindVariableFeatures(object = whole, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(whole) <-  VariableFeatures(whole)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(whole))]
+VariableFeaturePlot(whole)
+whole <- ScaleData(object = whole, features = VariableFeatures(object = whole), vars.to.regress = c("nCount_RNA", "percent.mt"))
+whole <- RunPCA(object = whole,
+                features =  VariableFeatures(object = whole),
+                dims = 1:50)
+gc()
+ElbowPlot(whole,ndims = 50)
+```
+
+```{r}
+whole <- RunHarmony(object = whole, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+whole <- RunUMAP(whole,dims = 1:15,reduction = "harmony")
+whole <- RunTSNE(whole,dims = 1:15,reduction = "harmony")
+
+whole <- FindNeighbors(whole, dims = 1:15,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  whole <- FindClusters(object = whole, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+whole <- JoinLayers(whole)
+```
+
+
+
+```{r}
+DimPlot(whole, group.by = "RNA_snn_res.0.4",label = T)
+DimPlot(whole, group.by = "orig.ident")
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"), split.by = "orig.ident", group.by = "RNA_snn_res.0.4")
+VlnPlot(whole, features=c("log10_nFeature_RNA","log10_nCount_RNA"),group.by = "RNA_snn_res.0.4")
+VlnPlot(whole, features=c("percent.mt"),group.by = "RNA_snn_res.0.4")
+FeaturePlot(whole, features = "log10_nFeature_RNA")
+FeaturePlot(whole, features = "percent.mt")
+FeaturePlot(whole, features = "percent.ribo")
+```
+
+
+```{r}
+DotPlot(whole,features = c("Pdcd1","Havcr2","Tox","Ctla4","Cd3e","Cd8a","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Slamf6","Prdm1","Xcl1","Il7r","Klrb1c","Klra3","Klrd1","Zeb2","Prf1","Isg15","Cx3cr1","Gzma","Gzmk","Lag3","Cd44","Eomes","Ikzf2","Entpd1","Mki67"),group.by = "RNA_snn_res.0.4",cluster.idents = F)+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+```{r}
+saveRDS(whole, file = paste0(outdir,"LCMV_day5-45_processed_V2.RDS"))
+```
+
+
+c8 and c2
+
+```{r}
+Idents(whole) <- "RNA_snn_res.0.4"
+FeaturePlot(whole, features = "Pdcd1",label = T,order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Tcf7",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Lef1",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Xcl1",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Id3",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Slamf6",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+
+FeaturePlot(whole, features = "Tox",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Havcr2",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Cd244a",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Prdm1",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Id2",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+FeaturePlot(whole, features = "Gzmb",label = T, order = T, split.by = "orig.ident",cols = c("grey90","red2"),ncol = 1)
+```
+
+
+```{r}
+VlnPlot(whole, features=c("Havcr2"), split.by = "orig.ident", group.by = "RNA_snn_res.0.4")
+VlnPlot(whole, features=c("Pdcd1"), split.by = "orig.ident", group.by = "RNA_snn_res.0.4")
+```
+
+
+## extract signature
+
+I'll isolate early stem-like (c2 and c8) and late TD (c0 and c3)
+
+```{r}
+comparison <- subset(whole, subset = RNA_snn_res.0.4 %in% c(0,1,2,5))
+```
+
+```{r}
+comparison@meta.data <- comparison@meta.data %>% mutate(
+  annotation = case_match(
+    as.character(RNA_snn_res.0.4),
+    "0" ~ "late TD",
+    "1" ~ "early stem-like",
+    "2" ~ "early stem-like",
+    "5" ~ "late TD"
+  )
+)
+```
+
+
+
+```{r}
+DimPlot(comparison, split.by = "orig.ident", group.by = "annotation")
+```
+
+```{r}
+early_stem <- subset(comparison, subset = annotation == "early stem-like" & orig.ident == "Day 5")
+late_TD <- subset(comparison, subset = annotation == "late TD" & orig.ident == "Day 45")
+```
+
+```{r}
+DimPlot(early_stem, split.by = "orig.ident", group.by = "annotation")
+DimPlot(late_TD, split.by = "orig.ident",group.by = "annotation")
+```
+
+```{r}
+comparison <- merge(early_stem,late_TD)
+comparison <- JoinLayers(comparison) # no need to go through workflow since DEG are calculated using data slot aka the normalized reads.
+```
+
+
+```{r}
+Idents(comparison) <- "annotation"
+```
+
+```{r}
+late_TD_DEG <- FindMarkers(comparison, ident.1 = "late TD", ident.2 = "early stem-like",test.use = "MAST", min.pct = 0.2)
+```
+
+
+```{r}
+late_TD_DEG$gene <- rownames(late_TD_DEG)
+```
+
+```{r}
+late_TD_sig <- unlist(late_TD_DEG %>% slice_max(order_by = avg_log2FC, n = 150) %>% select(gene))
+```
+
+```{r}
+write.table(late_TD_sig,file  = "signature_mapping_LCMV/late_TD_vs_early_stem_signature.txt",sep = "\t",col.names = F, row.names = F, quote = F)
+```
+
+
+```{r}
+early_stem_DEG <- FindMarkers(comparison, ident.2 = "late TD", ident.1 = "early stem-like",test.use = "MAST", min.pct = 0.2)
+
+
+early_stem_DEG$gene <- rownames(early_stem_DEG)
+```
+
+```{r}
+early_stem_sig <- unlist(early_stem_DEG %>% slice_max(order_by = avg_log2FC, n = 150) %>% select(gene))
+```
+
+```{r}
+write.table(early_stem_sig,file  = "signature_mapping_LCMV/early_stem_vs_late_TD_signature.txt",sep = "\t",col.names = F, row.names = F, quote = F)
+```
+
+```{r}
+
+```
+
+

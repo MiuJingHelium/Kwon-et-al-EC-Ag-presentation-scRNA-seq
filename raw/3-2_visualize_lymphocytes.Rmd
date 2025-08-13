@@ -1,0 +1,296 @@
+---
+title: "3-2_visualize_lymphocytes"
+output: html_document
+date: "2025-05-08"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(mascarade)
+library(data.table)
+library(ComplexHeatmap)
+library(circlize)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "darkblue"
+pal[19] <- colors()[60]
+pal[13] <- "turquoise4"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+Note: since proportion information relies on whole dataset, proportion plots will be made here. An easier way is to export the metadata for visualization and manipulation
+
+```{r}
+indir <- "RDS/"
+outdir <- "formal-visualization/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+
+## load objects
+
+```{r}
+T_cells <- readRDS(paste0(indir,"T_cells_V1p4.Rds"))
+lymphocytes <- readRDS(file = paste0(indir,"lymphocytes_V1p4.RDS"))
+whole <- readRDS(file = paste0(indir,"whole_V1p4.RDS"))
+```
+
+
+## overview plots
+```{r}
+table(whole$compartment)
+```
+
+
+```{r}
+whole@meta.data <- whole@meta.data %>%
+  mutate(highlight = case_match(
+    compartment,
+    "Lymphocytes" ~ "Lymphocytes",
+    .default = "NA"
+  ))
+```
+
+```{r}
+DimPlot(whole,group.by = "highlight") + 
+  scale_color_manual(values = c("Lymphocytes" = colorRampPalette(brewer.pal(11, "RdYlBu"))(8)[3],na.value = "grey90"))
+g <- DimPlot(whole,group.by = "highlight") + 
+  scale_color_manual(values = c("Lymphocytes" = colorRampPalette(brewer.pal(11, "RdYlBu"))(8)[3],na.value = "grey90"))
+ggsave(filename = paste0(outdir,"Supp_Whole_Lymphocytes_unsplit.pdf"), plot = g, units = "cm",height = 10,width = 12)
+```
+
+
+```{r}
+maskTable <- generateMask(dims=lymphocytes@reductions$umap@cell.embeddings, 
+                          clusters=lymphocytes$annotation_V1)
+data <- data.table(lymphocytes@reductions$umap@cell.embeddings, 
+                   cluster=lymphocytes$annotation_V1,
+                   lymphocytes@meta.data)
+centers <- data %>% 
+  dplyr::group_by(cluster) %>% 
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2)) 
+
+
+data$orig.ident <- factor(data$orig.ident, levels = c("WT_HC","KO_HC"))
+```
+
+```{r}
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  geom_text(data = centers, aes(label=cluster), size = 3.5, color = "black") +
+    scale_color_manual(values = pal)+
+    coord_fixed() + 
+    theme_classic()+facet_wrap(~orig.ident)+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 3))) 
+g
+ggsave(filename = paste0(outdir,"lymphocytes_V1p4_annotated_umap_split_mascarade.pdf"), plot = g, width = 18, height = 7)
+
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=cluster)) +
+  ggrepel::geom_text_repel(data = centers, aes(label=cluster), size = 5, color = "black",min.segment.length = unit(0, 'lines'),force = 5, label.padding = 5,max.overlaps = Inf,direction = "both") +
+    scale_color_manual(values = pal[c(1:8,10:15)])+
+    coord_fixed() + 
+    theme_classic()+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 3))) 
+g
+ggsave(filename = paste0(outdir,"lymphocytes_V1p4_annotated_umap_mascarade.pdf"), plot = g, width = 18, height = 7)
+```
+
+```{r}
+p1 <- DotPlot(lymphocytes, group.by = "annotation_V1",features = c("Cd3e","Ncr1","Tyrobp","Klrb1c","Kit","Cd4","Foxp3","Gata2","Il4","Il5","Il13","Cd8a","Lef1","Ccr7","Slamf6","Ccr4","Cd69","Il2ra","Cd44","Prf1","Gzmb","Gzmk","Lag3","Pdcd1","Tox","Havcr2","Mki67"))+scale_color_gradientn(colors = c("grey90","red2","red3"))+ RotatedAxis()+coord_flip()
+ggsave(filename = paste0(outdir,"Supp_lymphocytes_Dotplot_annotation.pdf"), plot = p1, units = "cm",height = 24,width = 20)
+```
+
+
+
+
+## T cells
+
+```{r}
+table(T_cells$annotation_V1)
+```
+### T cell type markers
+
+```{r}
+markers <- c("Cd3e","Ncr1","Tyrobp","Klrb1c","Kit","Cd4","Foxp3","Gata2","Il4","Il5","Il13","Cd8a","Lef1","Ccr7","Tcf7","Prf1","Gzma","Gzmk","Pdcd1","Lag3","Mki67")
+```
+
+Try mascarade featureplot
+
+
+
+
+
+### T cell state markers
+
+
+```{r}
+avg_T <- AggregateExpression(subset(T_cells, subset = annotation_V1 %in% c("c0: Naive CD8 T", "c2: Treg", "c3: Th2", "c4: Tem/ex", "c5: Th", "c6: Tex") ), assays = "RNA",features = unique(c("Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Slamf6","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2","Isg15", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Gzmg", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra8", "Klra9","Cd7","Cd5")), return.seurat = T,group.by = c("annotation_V1","orig.ident"))
+```
+
+
+```{r}
+table(avg_T$annotation_V1)
+```
+
+
+```{r}
+avg_T$annotation_V1 <- factor(avg_T$annotation_V1, levels = c("g Naive CD8 T", "g Treg", "g Th2","g Tem/ex","g Th","g Tex"))
+avg_T$sample <- rep(c("WT_HC","KO_HC"),6)
+T_pal <- pal[c(1,3,4,5,6,7)]
+names(T_pal) <- unique(unname(avg_T$annotation_V1))
+col = list(
+  Cell_type = T_pal,
+  Sample = c("WT_HC"="red3", "KO_HC" = "darkblue")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_T$annotation_V1), Sample = unname(avg_T$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_T,layer = "scale.data")
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+```{r}
+pdf(paste0(outdir,"T_marker_Heatmap.pdf"))
+Heatmap(mat,name = "T cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+```{r}
+avg_T <- AggregateExpression(subset(T_cells, subset = annotation_V1 %in% c("c0: Naive CD8 T", "c4: Tem/ex", "c6: Tex") ), assays = "RNA",features = unique(c("Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Slamf6","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2","Isg15", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra9","Cd7","Cd5")), return.seurat = T,group.by = c("annotation_V1","orig.ident"))
+```
+
+
+```{r}
+table(avg_T$annotation_V1)
+```
+
+```{r}
+avg_T$annotation_V1 <- factor(avg_T$annotation_V1, levels = c("g Naive CD8 T", "g Tem/ex","g Tex"))
+avg_T$sample <- rep(c("WT_HC","KO_HC"),6)
+T_pal <- pal[c(1,5,7)]
+names(T_pal) <- unique(unname(avg_T$annotation_V1))
+col = list(
+  Cell_type = T_pal,
+  Sample = c("WT_HC"="red3", "KO_HC" = "darkblue")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_T$annotation_V1), Sample = unname(avg_T$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_T,layer = "scale.data")
+Heatmap(mat,name = "CD8 T cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+```{r}
+pdf(paste0(outdir,"CD8_T_marker_Heatmap.pdf"))
+Heatmap(mat,name = "CD8 T cells",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+dev.off()
+```
+
+## NK subsets
+
+```{r}
+table(lymphocytes$annotation_V1)
+```
+```{r}
+NK <- subset(lymphocytes, subset = annotation_V1 == "L0: NK")
+```
+
+```{r}
+NK <- FindVariableFeatures(object = NK, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(NK) <-  VariableFeatures(NK)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(NK))]
+VariableFeaturePlot(NK)
+NK <- ScaleData(object = NK, features = VariableFeatures(object = NK), vars.to.regress = c("nCount_RNA", "percent.mt"))
+NK <- RunPCA(object = NK,
+                features =  VariableFeatures(object = NK),
+                dims = 1:50)
+gc()
+ElbowPlot(NK,ndims = 50)
+```
+
+```{r}
+library(harmony)
+NK <- RunHarmony(object = NK, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+NK <- RunUMAP(NK,dims = 1:20,reduction = "harmony")
+NK <- RunTSNE(NK,dims = 1:20,reduction = "harmony")
+
+NK <- FindNeighbors(NK, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  NK <- FindClusters(object = NK, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+NK <- JoinLayers(NK)
+```
+
+```{r}
+Idents(NK) <- "RNA_snn_res.0.3"
+DimPlot(NK, group.by = "RNA_snn_res.0.3", pt.size = 2, split.by = "orig.ident")+scale_color_manual(values = pal)
+VlnPlot(NK, features = "Isg15",group.by = "RNA_snn_res.0.3")+scale_fill_manual(values = pal)
+VlnPlot(NK, features = "Lef1",group.by = "RNA_snn_res.0.3")+scale_fill_manual(values = pal)
+VlnPlot(NK, features = "Ccl4",group.by = "RNA_snn_res.0.3")+scale_fill_manual(values = pal)
+FeaturePlot(NK, features = "Isg15", label = T)
+```
+
+```{r}
+NK_markers <- FindAllMarkers(NK)
+```
+
+```{r}
+sample_imm_size = data.frame(table(whole$orig.ident))
+sample_imm_size <- sample_imm_size %>% dplyr::rename(n_immune = Freq, orig.ident = Var1)
+```
+
+```{r}
+clust_prop <- NK@meta.data %>% group_by(RNA_snn_res.0.3,orig.ident) %>% summarise(n_subpop = n()) %>% ungroup() %>% group_by(orig.ident) %>% mutate(percentage = 100*n_subpop/sum(n_subpop))
+
+clust_prop <- full_join(clust_prop,sample_imm_size, by = "orig.ident")
+
+clust_prop <- clust_prop %>% group_by(orig.ident) %>% mutate(percentage = 100*n_subpop/n_immune)
+clust_prop$orig.ident <- factor(clust_prop$orig.ident, levels = c("WT_HC","KO_HC"))
+```
+
+```{r}
+g3 <- ggplot(clust_prop,aes(x = orig.ident, y = percentage, fill = RNA_snn_res.0.3))+
+  geom_bar(stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("% in immune cells")+
+  xlab("subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~RNA_snn_res.0.3, scales = "free")
+g3  
+```
+
+```{r}
+avg_NK <- AggregateExpression(NK, assays = "RNA",features = unique(c("Havcr2","Isg15","Junb","Cebpb","Ccl3","Ccl5","Cd69","Gzma","Gzmb","Ncr1","Mki67","Tigit","Tox","Ccr7","Tcf7","Lef1","Tbx21","Tyrobp","Klrb1c","Ctla4","Lag3","Eomes","Ifng","Xcl1","Cd7","Il2ra","Il7r","Sell","Entpd1", "Lag3", "Ctla4", "Icos", "Cd200", "Hspd1", "Klrc1", "Klrc2", "Cd44", "Havcr2", "Ifitm1", "Ifitm2", "Gzmb", "Gzmd", "Gzme", "Gzmg", "Klrg1", "Serpinb6a", "Serpinb9", "Il10", "Prf1", "Cxcr3", "Ccl5", "Foxo1", "Ncr1", "Sell", "Klra3", "Klra5", "Klra8", "Klra9")), return.seurat = T,group.by = c("RNA_snn_res.0.3","orig.ident"))
+```
+
+```{r}
+avg_NK$sample <- rep(c("WT_HC","KO_HC"),2)
+NK_pal <- pal[1:2]
+names(NK_pal) <- unique(unname(avg_NK$RNA_snn_res.0.3))
+col = list(
+  Cell_type = NK_pal,
+  Sample = c("WT_HC"="red3", "KO_HC" = "darkblue")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(avg_NK$RNA_snn_res.0.3), Sample = unname(avg_NK$sample),
+  col = col
+)
+mat <-  GetAssayData(avg_NK,layer = "scale.data")
+Heatmap(mat,name = "NK",top_annotation = ha,cluster_rows = T,cluster_columns = F,show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-2,0,2),c("darkblue","white","red")))
+```
+
+

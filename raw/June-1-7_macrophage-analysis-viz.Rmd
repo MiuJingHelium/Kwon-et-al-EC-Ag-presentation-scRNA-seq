@@ -1,0 +1,493 @@
+---
+title: "June-1-7_macrophage-analysis-viz"
+output: html_document
+date: "2025-06-29"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(harmony)
+library(SeuratWrappers)
+library(mascarade)
+library(data.table)
+library(ComplexHeatmap)
+library(circlize)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+
+pal2 <- pal[c(1:8,10,13:14,16:20, 22:25,27:30, 33:35 )] # use pal2
+```
+
+```{r}
+RDSdir <- "RDS/"
+outdir <- "V1p3-2_moMac_plots/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+
+```{r}
+myeloid <- readRDS(paste0(RDSdir,"myeloid_V1p3-2.RDS"))
+```
+
+```{r}
+whole <- readRDS(paste0(RDSdir, "whole_V1p4-2.RDS"))
+```
+
+
+
+```{r}
+myeloid$annotation_V1 <- factor(myeloid$annotation_V1, levels = c("M0: Mo-Mac1",
+                                                                  "M1: Mo-Mac2",
+                                                                  "M2: Mo-Mac3",
+                                                                  "M4: Mo-Mac4",
+                                                                  "M7: Mo-Mac5",
+                                                                  "M8: Proliferating Mo-Mac",
+                                                                  "M11: Mo-Mac6",
+                                                                  "M12: Mo-Mac7",
+                                                                  "M6: Neutrophil",
+                                                                  "M5: Mo-DC/monocytes",
+                                                                  "M9: migDC",
+                                                                  "M10: cDC1/DC2",
+                                                                  "M3: Basophil/granulocytes",
+                                                                  "M13: granulocytes/mast cells"
+  
+))
+```
+
+```{r}
+saveRDS(myeloid, file = paste0(RDSdir,"myeloid_V1p3-2.RDS"))
+```
+
+
+```{r}
+mo_Mac <- subset(myeloid, subset = annotation_V1 %in% c("M0: Mo-Mac1","M1: Mo-Mac2","M2: Mo-Mac3","M4: Mo-Mac4","M7: Mo-Mac5","M8: Proliferating Mo-Mac","M11: Mo-Mac6","M12: Mo-Mac7"))
+```
+
+```{r}
+DimPlot(mo_Mac, group.by = "annotation_V1")+scale_color_manual(values = pal)
+```
+
+### step 1 comparison of WT v.s. MKO marker expression
+
+
+```{r}
+mo_Mac@meta.data <- mo_Mac@meta.data %>% mutate(
+  condition = factor(
+    case_match(
+      orig.ident,
+      "WT_HC" ~ "WT",
+      "KO_HC" ~ "MKO"
+    ), levels = c("WT", "MKO")
+  )
+)
+```
+
+```{r}
+VlnPlot(mo_Mac, features = c("Tek", "Tlr4"),pt.size = 0.1, ,group.by = "condition",alpha = 0.05, cols = c("grey90","red3"), ncol = 4)
+```
+
+```{r}
+g <- VlnPlot(mo_Mac, features = c("Nos2", "Ccr2","Chil3","Mrc1", "Arg1", "Trem2", "Cx3cr1", "Mki67"),pt.size = 0.1, ,group.by = "condition",alpha = 0.05, cols = c("grey90","red3"), ncol = 4)
+g
+ggsave(paste0(outdir, "Mo-Mac_markers_WT-vs_KO_ann-V1_Vlnplot.pdf"),plot = g, width = 5, height = 5)
+```
+```{r}
+g <- VlnPlot(subset(mo_Mac,subset = annotation_V1 %in% c("M7: Mo-Mac5","M11: Mo-Mac6")), features = c("Nos2"),pt.size = 0.1, ,group.by = "annotation_V1", split.by = "condition",alpha = 0.05, cols = c("grey90","red3"), ncol = 4)
+g
+ggsave(paste0(outdir, "Mo-Mac_Nos_WT-vs_KO_ann-V1_Vlnplot.pdf"),plot = g, width =6, height = 4)
+```
+
+
+### step 2 check key TAM markers in mo-Mac clusters
+
+
+
+```{r}
+g <-  VlnPlot(mo_Mac, features = c("Spp1","Cd68","Cd80","Cd86",
+                                   "Tnf","Cxcl9","Cxcl10","Il23a",
+                                   "Il6","Il1b","Il12a","Il10"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+ggsave(paste0(outdir, "Mo-Mac_markers-3_ann-V1_Vlnplot.pdf"),plot = g, width = 8, height = 12)
+```
+
+```{r}
+g <-  VlnPlot(mo_Mac, features = c("Lyve1","Adgre1",
+                                   "Cd207","Itgam","Itgax","Clec7a","Id2","Clec10a","Csf1r",
+                                   "Mmp9","Cd274","Il10",
+                                   "Mrc1","Tek","Tlr4",
+                                   "Ccl2","Ccl9","Vegfa",
+                                   "Cxcl12","Angpt2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 5,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+ggsave(paste0(outdir, "Mo-Mac_markers-4_ann-V1_Vlnplot.pdf"),plot = g, width = 12, height = 12)
+```
+
+
+```{r}
+VlnPlot(mo_Mac, features = c("Lyve1"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Adgre1"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+VlnPlot(mo_Mac, features = c("Cd207"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) #Langerin
+VlnPlot(mo_Mac, features = c("Itgam"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # CD11b
+VlnPlot(mo_Mac, features = c("Itgax"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # CD11c
+VlnPlot(mo_Mac, features = c("Siglec1"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # CD169 #deep dermal dependent
+VlnPlot(mo_Mac, features = c("Clec7a"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # Dectin-1
+VlnPlot(mo_Mac, features = c("Id2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # check LC marker
+VlnPlot(mo_Mac, features = c("Clec10a"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # CD301
+VlnPlot(mo_Mac, features = c("Csf1r"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # 
+# ggsave(paste0(outdir, "Mo-Mac_markers-3_ann-V1_Vlnplot.pdf"),plot = g, width = 8, height = 12)
+```
+
+```{r}
+# insavesive front markers
+VlnPlot(mo_Mac, features = c("Mmp9"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)]) # 
+VlnPlot(mo_Mac, features = c("Cd274"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Il10"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+# vasculature interaction
+VlnPlot(mo_Mac, features = c("Mrc1"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Tek"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Tlr4"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+```
+
+```{r}
+# recruitment
+VlnPlot(mo_Mac, features = c("Ccl2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Ccl9"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Vegfa"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+#hypoxia
+VlnPlot(mo_Mac, features = c("Cxcl12"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Angpt2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+```
+
+
+```{r}
+g <-  VlnPlot(mo_Mac, features = c("Il1b","Cxcl2",
+                                   "Ccl4","Cxcr4","Nr4a1","Nr4a2","Nlrp3","Nfkb1","Areg",
+                                   "Folr2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 5,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+ggsave(paste0(outdir, "Mo-Mac_markers-5_ann-V1_Vlnplot.pdf"),plot = g, width = 12, height = 7)
+```
+
+
+```{r}
+#inflammatory cytokines
+VlnPlot(mo_Mac, features = c("Il1b"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Cxcl2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Ccl4"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Cxcr4"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+# tissue residency
+VlnPlot(mo_Mac, features = c("Nr4a1"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Nr4a2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Nlrp3"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+# NFkB
+VlnPlot(mo_Mac, features = c("Nfkb1"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+#VlnPlot(mo_Mac, features = c("Nfkb1a"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+
+```
+
+
+```{r}
+VlnPlot(mo_Mac, features = c("Mertk", "Il1r2","Cd1d1","Vcam1", "Isg15", "Rsad2", "Sell", "Plac8"),pt.size = 0.1, ,group.by = "condition",alpha = 0.05, cols = c("grey90","red3"), ncol = 4)
+g <- VlnPlot(mo_Mac, features = c("Mertk", "Il1r2","Cd1d1","Vcam1", "Isg15", "Rsad2", "Sell", "Plac8"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+ggsave(paste0(outdir, "Mo-Mac_markers-2_ann-V1_Vlnplot.pdf"),plot = g, width = 8, height = 8)
+```
+
+
+```{r}
+DoHeatmap(mo_Mac, features = c("Ccr2","Cx3cr1","Mrc1","Cd1d1","Nos2","Mertk","Vcam1","Ccl7","Pf4","Cd63","Ccl2","Cd72","Cd81","Fgd2","Cd11c","Arg1","Nov","Pdcd1lg2","Itga4","Sell","Plac8","Fas","Ms4a4c","Chil3","Ly6i","Cxcl2","Cd9","Sgk1","Clec4e","Irg1","Hcar2","Inhba","Cd274","Il7r","Isg15","Ifit3","Rsad2"), group.by = "annotation_V1")
+```
+
+```{r}
+table(mo_Mac$condition)
+```
+
+```{r}
+mo_marker_avg <- AggregateExpression(mo_Mac, features = c("Ccr2","Adgre1","Spp1","Trem2","Mrc1","Chil3","Arg1","Nt5e","Fgf13","Mgl2","Klrb1b","H2-Eb1","H2-Aa","H2-Ab1","Cd74","Ly6c2","Hp","Plac8","Fas","Clec4e","Cx3cr1","Pf4","Folr2","Cd163","Cd1d1","Nos2","Mertk","Vcam1","Ccl7","Cd63","Ccl2","Cd72","Cd81","Fgd2","Cd11c","Pdcd1lg2","Itga4","Sell","Ms4a4c","Ly6i","Cxcl2","Cd9","Sgk1","Irg1","Hcar2","Inhba","Hilpda","Cd274","Il7r","Isg15","Ifit3","Rsad2","Cpb2","Pde4c","Pecam1","Polg2","Supv3l1","Nup107","Nup210l","Mki67"), group.by = c("annotation_V1","orig.ident"), return.seurat = T)
+```
+
+```{r}
+table(mo_Mac$annotation_V1)
+```
+
+```{r}
+mo_Mac@meta.data <- mo_Mac@meta.data %>% mutate(
+  label = factor(case_match(
+    annotation_V1,
+    "M0: Mo-Mac1" ~ "1",
+    "M1: Mo-Mac2" ~ "2",
+    "M2: Mo-Mac3" ~ "3",
+    "M4: Mo-Mac4" ~ "4",
+    "M7: Mo-Mac5" ~ "5",
+    "M8: Proliferating Mo-Mac" ~ "Pm",
+    "M11: Mo-Mac6" ~ "6",
+    "M12: Mo-Mac7" ~ "7"
+  ),
+  levels = c("1","2","3","4","5","Pm","6","7"))
+)
+```
+
+```{r}
+g <- DotPlot(mo_Mac, group.by = "label", features = c("Ccr2","Adgre1","Spp1","Trem2","Mrc1","Chil3","Arg1","Nt5e","Creb5","Fgf13","Mgl2","Klrb1b","H2-Eb1","H2-Aa","H2-Ab1","Cd74","Ly6c2","Hp","Plac8","Fas","Clec4e","Cx3cr1","Pf4","Folr2","Cd163","Mertk","Vcam1","Ccl7","Cd63","Ccl2","Cd72","Cd81","Fgd2","Cd11c","Pdcd1lg2","Itga4","Sell","Ms4a4c","Cxcl2","Cd9","Sgk1","Irg1","Hcar2","Inhba","Hilpda","Cd274","Il7r","Mki67","Isg15","Ifit3","Rsad2","Cpb2","Pde4c","Polg2","Supv3l1","Nup107","Nup210l"), cluster.idents = F,col.min = 0)+scale_color_gradientn(colours = c("grey90","red2","red3"))+RotatedAxis()+coord_flip()
+g
+ggsave(filename = paste0(outdir,"marker_dotplot_ann-V1.pdf"), plot = g, width = 6, height = 14)
+```
+
+```{r}
+g <- VlnPlot(mo_Mac, features = c("Ccr2","Adgre1","Spp1","Trem2","Mrc1","Cx3cr1","Arg1", "Isg15","Chil3","Nos2"), group.by = "label", alpha = 0.01,cols = pal2[13:26][c(1:3,5,8,9,12,13)], ncol = 2)
+g
+ggsave(paste0(outdir, "Mo-Mac_markers_ann-V1_Vlnplot_unsplit_panel2.pdf"),plot = g, width = 5, height = 10)
+```
+
+
+```{r}
+exp_scaled <- mo_marker_avg@assays$RNA@layers$scale.data
+rownames(exp_scaled) <- rownames(mo_marker_avg)
+colnames(exp_scaled) <- colnames(mo_marker_avg)
+```
+
+```{r}
+rowdata = data.frame(gene = rownames(exp_scaled))
+```
+
+```{r}
+exp_scaled <- cbind(rowdata, exp_scaled)
+```
+
+```{r}
+colmeta <- mo_marker_avg@meta.data
+```
+
+```{r}
+write.table(exp_scaled, file = paste0(outdir,"scaled_Gubin_marker_exp.tsv"), sep = "\t", col.names = T, row.names = F, quote = F)
+write.table(colmeta, file = paste0(outdir,"scaled_Gubin_marker_coldata.tsv"), sep = "\t", col.names = T, row.names = T, quote = F)
+write.table(rowdata, file = paste0(outdir,"scaled_Gubin_marker_rowdata.tsv"), sep = "\t", col.names = T, row.names = F, quote = F)
+```
+
+
+```{r}
+table(mo_marker_avg$annotation_V1)
+```
+
+```{r}
+mo_marker_avg$annotation_V1 <- factor(mo_marker_avg$annotation_V1, levels = c(paste0("g Mo-Mac",1:7), "g Proliferating Mo-Mac"))
+mo_marker_avg$sample <- rep(c("KO_HC","WT_HC"),8)
+mo_marker_avg$sample <- factor(mo_marker_avg$sample, levels = c("WT_HC","KO_HC"))
+mph_pal <- pal2[13:26][c(1:3,5,8,9,12,13)]
+names(mph_pal) <- unique(unname(mo_marker_avg$annotation_V1))
+col = list(
+  Cell_type = mph_pal,
+  Sample = c("WT_HC"="grey90", "KO_HC" = "red2")
+)
+ha <- HeatmapAnnotation(
+   Cell_type = unname(mo_marker_avg$annotation_V1), Sample = unname(mo_marker_avg$sample),
+  col = col
+)
+mat <-  GetAssayData(mo_marker_avg,layer = "scale.data")
+
+Heatmap(mat,name = "scaled expression",top_annotation = ha,cluster_rows = T,cluster_columns = F,
+        column_order = c("g Mo-Mac1_M0_WT-HC","g Mo-Mac1_M0_KO-HC",
+                         "g Mo-Mac2_M1_WT-HC", "g Mo-Mac2_M1_KO-HC",
+                         "g Mo-Mac3_M2_WT-HC","g Mo-Mac3_M2_KO-HC",
+                         "g Mo-Mac4_M4_WT-HC","g Mo-Mac4_M4_KO-HC",
+                         "g Mo-Mac5_M7_WT-HC","g Mo-Mac5_M7_KO-HC",
+                         "g Mo-Mac6_M11_WT-HC","g Mo-Mac6_M11_KO-HC",
+                         "g Mo-Mac7_M12_WT-HC","g Mo-Mac7_M12_KO-HC",
+                         "g Proliferating Mo-Mac_M8_WT-HC","g Proliferating Mo-Mac_M8_KO-HC"),
+        show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-1.5,0,1.5),c("darkblue","white","red")))
+
+```
+
+
+```{r}
+pdf(paste0(outdir,"mo-Mac_marker-Gubin_Heatmap.pdf"), width = 6, height = 5)
+Heatmap(mat,name = "scaled expression",top_annotation = ha,cluster_rows = T,cluster_columns = F,
+        column_order = c("g Mo-Mac1_M0_WT-HC","g Mo-Mac1_M0_KO-HC",
+                         "g Mo-Mac2_M1_WT-HC", "g Mo-Mac2_M1_KO-HC",
+                         "g Mo-Mac3_M2_WT-HC","g Mo-Mac3_M2_KO-HC",
+                         "g Mo-Mac4_M4_WT-HC","g Mo-Mac4_M4_KO-HC",
+                         "g Mo-Mac5_M7_WT-HC","g Mo-Mac5_M7_KO-HC",
+                         "g Mo-Mac6_M11_WT-HC","g Mo-Mac6_M11_KO-HC",
+                         "g Mo-Mac7_M12_WT-HC","g Mo-Mac7_M12_KO-HC",
+                         "g Proliferating Mo-Mac_M8_WT-HC","g Proliferating Mo-Mac_M8_KO-HC"),
+        show_row_names = TRUE,show_column_names = F,row_names_side = "left",row_names_gp = grid::gpar(fontsize = 6),col = colorRamp2(c(-1.5,0,1.5),c("darkblue","white","red")))
+dev.off()
+```
+
+
+
+```{r}
+
+```
+
+### step 3 check markers of clusters
+
+first create mo-mac object for SCN link generation
+
+```{r}
+mo_Mac <- FindVariableFeatures(object = mo_Mac, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeaturePlot(mo_Mac)
+
+mo_Mac <- ScaleData(object = mo_Mac, features = VariableFeatures(object = mo_Mac), vars.to.regress = c("nCount_RNA", "percent.mt","percent.ribo"))
+mo_Mac <- RunPCA(object = mo_Mac,
+                features =  VariableFeatures(object = mo_Mac),
+                dims = 1:50)
+gc()
+ElbowPlot(mo_Mac,ndims = 50)
+```
+
+```{r}
+mo_Mac <- RunHarmony(object = mo_Mac, group.by.vars = c("orig.ident"), max.iter.harmony = 20) # use harmony to correct for batch effect
+## cluster with a different parameter
+# first try: 20 --> try 15 or 30
+mo_Mac <- RunUMAP(mo_Mac,dims = 1:20,reduction = "harmony") # use harmony embedding for downstream analysis
+mo_Mac <- RunTSNE(mo_Mac,dims = 1:20,reduction = "harmony")
+
+mo_Mac <- FindNeighbors(mo_Mac, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   # iterate over a range of resolutions
+  mo_Mac <- FindClusters(object = mo_Mac, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+```
+
+```{r}
+saveRDS(mo_Mac, file = paste0(RDSdir,"mo_Mac_V1p3-2.RDS"))
+```
+
+```{r}
+mo_Mac <- readRDS(file = paste0(RDSdir,"mo_Mac_V1p3-2.RDS"))
+```
+
+```{r}
+DimPlot(mo_Mac, group.by = "annotation_V1")+scale_color_manual(values = pal2)
+DimPlot(mo_Mac, group.by = "RNA_snn_res.0.4")+scale_color_manual(values = pal2)
+```
+
+```{r}
+FeaturePlot(mo_Mac, features = "Rsad2")
+FeaturePlot(mo_Mac, features = "Hp")
+FeaturePlot(mo_Mac, features = "Cpb2")
+FeaturePlot(mo_Mac, features = "Hilpda")
+```
+
+
+```{r}
+Idents(mo_Mac) <- "annotation_V1"
+markers_ann <- FindAllMarkers(mo_Mac)
+Idents(mo_Mac) <- "RNA_snn_res.0.4"
+markers_res04 <- FindAllMarkers(mo_Mac)
+```
+
+```{r}
+res04_marker_flt <- markers_res04 %>% filter( p_val_adj < 0.00001)
+```
+
+
+```{r}
+ann_marker_flt <- markers_ann %>% filter(pct.1 >=0.5 & pct.2 <= 0.5)
+```
+
+
+```{r}
+## ann_V1 markers
+VlnPlot(mo_Mac, features = c("Cpb2"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Pde4c"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Axl"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Gas6"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Hp"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+VlnPlot(mo_Mac, features = c("Cd163"),pt.size = 0.1, ,group.by = "annotation_V1",alpha = 0.05, ncol = 4,cols = pal2[13:26][c(1:3,5,8,9,12,13)])
+```
+```{r}
+selected_genes = ann_marker_flt %>% group_by(cluster) %>% filter(p_val_adj < 0.0001) %>% slice_max(order_by = abs(avg_log2FC),n = 15) %>% select(gene) %>% ungroup()
+
+DoHeatmap(mo_Mac, features = selected_genes$gene, group.by = "annotation_V1")
+```
+```{r}
+selected_genes = res04_marker_flt %>% group_by(cluster) %>% filter(p_val_adj < 0.0001) %>% slice_max(order_by = abs(avg_log2FC),n = 10) %>% select(gene) %>% ungroup()
+
+DoHeatmap(mo_Mac, features = selected_genes$gene, group.by = "RNA_snn_res.0.4")
+```
+
+
+
+
+
+```{r}
+
+hist(markers_ann$pct.1[markers_ann$cluster=="M0: Mo-Mac1"]-markers_ann$pct.2[markers_ann$cluster=="M0: Mo-Mac1"],main = "distribution of pct.1-pct.2",xlab = "Pct.1-Pct.2")
+
+```
+
+
+```{r}
+mo1_selected <- rbind(markers_ann %>% filter(cluster == "M0: Mo-Mac1") %>% filter(pct.1 - pct.2 >=0.15),
+                      markers_ann %>% filter(cluster == "M0: Mo-Mac1") %>% filter(pct.1 - pct.2 <= -0.15))
+```
+
+```{r}
+write.table(mo1_selected, file = paste0(outdir,"moMac1_selected_markers.tsv"), sep = "\t", col.names = T, row.names = F)
+```
+
+#### update proportion if new clustering used
+
+```{r}
+sample_imm_size = data.frame(table(whole$orig.ident))
+sample_imm_size <- sample_imm_size %>% dplyr::rename(n_immune = Freq, orig.ident = Var1)
+```
+
+
+```{r}
+clust_prop <- mo_Mac@meta.data %>% group_by(RNA_snn_res.0.4,compartment,orig.ident) %>% summarise(n_subpop = n()) %>% ungroup()
+clust_prop <- left_join(clust_prop,sample_imm_size, by = "orig.ident")
+clust_prop <- clust_prop %>% group_by(orig.ident) %>% mutate(percentage = 100*n_subpop/n_immune)
+```
+
+```{r}
+ratio <- clust_prop %>% group_by(RNA_snn_res.0.4) %>% reframe(FC = log2(percentage[orig.ident == "KO_HC"]/percentage[orig.ident == "WT_HC"]))
+```
+
+
+```{r}
+g4 <- ggplot(ratio, aes( x = reorder(RNA_snn_res.0.4, -FC), y = FC))+
+  geom_bar(aes(fill = RNA_snn_res.0.4),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal2[13:26])+theme_classic()+
+  ylab("log2 % in KO v.s. WT immune cells")+
+  xlab("mo-mac subpopulations")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  geom_hline(yintercept = c(-1,1), color = "red3", linetype = 3)
+g4
+ggsave(filename = paste0(outdir,"mo-Mac_log2_percentage_bar_res04.pdf"), plot = g4, width = 6, height = 4)
+```
+
+
+
+### step 4 comparison of moMac clusters with Gubin mo-mac
+
+
+
+### steo 5 comparison of moMac clusters with other TAM paper
+
+Dunsmore 2024 on time and location factors in monocyte transition into TAM
+
+```{r}
+DotPlot(mo_Mac, group.by = "annotation_V1", features = c("Ly6c2","Hp","Lnc2","Plac8","Fcgr1","Ccl2","Mertk","Tnf","Aif1","Cxcl2","Slc2a1","Ero1l","Bnip3","Nt5e","Itgax","Cd36","Trem2","Gpnmb","Spp1"), cluster.idents = T)+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+
+
+
+

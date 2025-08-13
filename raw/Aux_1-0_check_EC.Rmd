@@ -1,0 +1,238 @@
+---
+title: "Aux_1-0_check_EC"
+output: html_document
+date: "2025-04-12"
+---
+
+```{r}
+library(Seurat)
+```
+
+```{r}
+indir <- "EC_analysis/merged/"
+outdir <- "EC_analysis/"
+```
+
+```{r}
+load(paste0(indir,"whole_object.Robj"))
+```
+
+```{r}
+whole <- UpdateSeuratObject(whole)
+```
+
+```{r}
+table(whole$orig.ident)
+```
+
+```{r}
+VlnPlot(whole, features = "Myct1", group.by  = "orig.ident")
+```
+
+```{r}
+Idents(whole) <- "orig.ident"
+WT <- subset(whole, idents = "WT")
+```
+
+```{r}
+VlnPlot(WT, features = "Myct1", group.by  = "orig.ident")
+```
+
+```{r}
+FeaturePlot(WT, features = "Myct1")
+```
+
+```{r}
+WT$Myct1 <- WT@assays$RNA@counts["Myct1",]
+```
+
+```{r}
+hist(WT$Myct1)
+```
+
+```{r}
+WT@meta.data <- WT@meta.data %>% mutate(
+  Myct1_exp = case_when(
+    Myct1 > 0  ~ "Myct1+",
+    Myct1 == 0 ~ "Myct1-"
+  )
+)
+```
+
+
+```{r}
+table(WT$Myct1_exp) #1962
+```
+
+```{r}
+Idents(WT) <- "Myct1_exp"
+Myct1_DEG <- FindMarkers(WT, ident.1 = "Myct1+", ident.2 = "Myct1-")
+```
+
+```{r}
+Myct1_DEG$gene <- rownames(Myct1_DEG)
+```
+
+```{r}
+write.table(Myct1_DEG, file = paste0(outdir,"EC_Myct1_exp_DEG.tsv"), sep = "\t", col.names = T, row.names = F, quote = F)
+```
+
+```{r}
+Myct1_DEG <- read.table(file = paste0(outdir,"EC_Myct1_exp_DEG.tsv"), sep = "\t",header = T)
+```
+
+```{r}
+branching_morph_genes <- unlist(strsplit("Tgfb1/Dll4/Slc12a2/Spry1/Prdm1/Bmp2", split = "/"))
+angiogenesis_genes <- unlist(strsplit("Hk2/Itgb2/Thbs2/Hmga2/C3ar1/Dcn/Cybb/F3/Ccbe1/C5ar1/Sema3e/Vegfa/Angpt2/Sphk1/Ccr2/Serpinf1/Tcf4/Col4a2/Alox5/Plk2/Emilin2/Ecscr/Cx3cr1/Tie1/Acvrl1/Slc12a2/Il1b/Flt1/Nrp1", split = "/"))
+blood_vessel_remodeling <-  unlist(strsplit("Angpt2/Gja1/Dll4/Bcr", split = "/"))
+leukocyte_migration <- unlist(strsplit("Pla2g7/Trem2/Rac2/Fcgr3/Ccl7/Itgb2/Il33/Spi1/C3ar1/Csf1r/Itgam/Ccl9/Aif1/Kcnn4/Rac3/C5ar1/Itgb7/Ccr1/Spp1/Vegfa/Slamf9/Cxcl5/Eps8/Ccr2/Alox5/Myo1f/Tgfb1/Ccl6/Cx3cr1/Podxl/Trem1/Adam8/Myo1g/Cd300a/Slc12a2/Fcer1g/Ccl12/Il1b/Flt1/Cd200/Selplg/Bcr/Camk1d/Crtam/Ptpro/Ccl4/Artn", split = "/"))
+sprouting_angiogenesis <- unlist(strsplit("Esm1/Tgfb1/Dll4", split = "/"))
+
+```
+
+```{r}
+Myct1_DEG <- Myct1_DEG %>% mutate(
+                                  threshold = case_when(
+                                    abs(avg_log2FC) > 0.5 & p_val_adj <= 0.01 ~ "DEG",
+                                    .default = "Other"
+                                  ))
+
+g1 <- ggplot(Myct1_DEG,aes(x = avg_log2FC, y = -log10(p_val_adj), color = threshold))+
+  geom_point()+
+  scale_color_manual(values = c("DEG" = "red3", "Other" = "grey90"))+
+  geom_hline(yintercept = 2, linetype = 2, color = "grey20")+
+  geom_vline(xintercept = c(-0.5,0.5), linetype = 2, color = "grey20")+
+  ggrepel::geom_text_repel(aes(label = ifelse(gene %in% branching_morph_genes &(threshold == "DEG"), gene, "")), color = "black",max.overlaps = Inf)+
+  theme_classic()+
+  ggtitle("Myct+ cells v.s. Myct- cells")
+g1
+ggsave(filename = paste0(outdir,"Volcano_branching_genes.pdf"), plot = g1, width = 12, height = 6)
+
+g1 <- ggplot(Myct1_DEG,aes(x = avg_log2FC, y = -log10(p_val_adj), color = threshold))+
+  geom_point()+
+  scale_color_manual(values = c("DEG" = "red3", "Other" = "grey90"))+
+  geom_hline(yintercept = 2, linetype = 2, color = "grey20")+
+  geom_vline(xintercept = c(-0.5,0.5), linetype = 2, color = "grey20")+
+  ggrepel::geom_text_repel(aes(label = ifelse(gene %in% blood_vessel_remodeling &(threshold == "DEG"), gene, "")), color = "black",max.overlaps = Inf)+
+  theme_classic()+
+  ggtitle("Myct+ cells v.s. Myct- cells")
+g1
+ggsave(filename = paste0(outdir,"Volcano_blood-vessel-remodeling_genes.pdf"), plot = g1, width = 12, height = 6)
+
+g1 <- ggplot(Myct1_DEG,aes(x = avg_log2FC, y = -log10(p_val_adj), color = threshold))+
+  geom_point()+
+  scale_color_manual(values = c("DEG" = "red3", "Other" = "grey90"))+
+  geom_hline(yintercept = 2, linetype = 2, color = "grey20")+
+  geom_vline(xintercept = c(-0.5,0.5), linetype = 2, color = "grey20")+
+  ggrepel::geom_text_repel(aes(label = ifelse(gene %in% sprouting_angiogenesis &(threshold == "DEG"), gene, "")), color = "black",max.overlaps = Inf)+
+  theme_classic()+
+  ggtitle("Myct+ cells v.s. Myct- cells")
+g1
+ggsave(filename = paste0(outdir,"Volcano_sprouting-angiogenesis_genes.pdf"), plot = g1, width = 12, height = 6)
+
+g1 <- ggplot(Myct1_DEG,aes(x = avg_log2FC, y = -log10(p_val_adj), color = threshold))+
+  geom_point()+
+  scale_color_manual(values = c("DEG" = "red3", "Other" = "grey90"))+
+  geom_hline(yintercept = 2, linetype = 2, color = "grey20")+
+  geom_vline(xintercept = c(-0.5,0.5), linetype = 2, color = "grey20")+
+  ggrepel::geom_text_repel(aes(label = ifelse(gene %in% leukocyte_migration &(threshold == "DEG"), gene, "")), color = "black",max.overlaps = 200)+
+  theme_classic()+
+  ggtitle("Myct+ cells v.s. Myct- cells")
+g1
+ggsave(filename = paste0(outdir,"Volcano_leukocyte-migration_genes.pdf"), plot = g1, width = 12, height = 6)
+
+
+g1 <- ggplot(Myct1_DEG,aes(x = avg_log2FC, y = -log10(p_val_adj), color = threshold))+
+  geom_point()+
+  scale_color_manual(values = c("DEG" = "red3", "Other" = "grey90"))+
+  geom_hline(yintercept = 2, linetype = 2, color = "grey20")+
+  geom_vline(xintercept = c(-0.5,0.5), linetype = 2, color = "grey20")+
+  ggrepel::geom_text_repel(aes(label = ifelse(threshold == "DEG", gene, "")), color = "black",max.overlaps = 50)+
+  theme_classic()+
+  ggtitle("Myct+ cells v.s. Myct- cells")
+g1
+ggsave(filename = paste0(outdir,"Volcano_top-DEGs_genes.pdf"), plot = g1, width = 12, height = 6)
+
+
+
+```
+
+```{r}
+
+```
+
+```{r}
+library(clusterProfiler)
+library(org.Mm.eg.db)
+```
+
+```{r}
+ego <- enrichGO(gene         = Myct1_DEG$gene[Myct1_DEG$p_val_adj <= 0.01 & Myct1_DEG$avg_log2FC > 0.5] ,
+                OrgDb         = org.Mm.eg.db,
+                keyType       = 'SYMBOL',
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05)
+head(ego, 3)  
+```
+
+```{r}
+res_df <- ego@result
+```
+
+```{r}
+write.table(res_df, file = paste0(outdir,"EC_Myct1-pos_up_DEG_EnrichGO_BP.tsv"), sep = "\t", col.names = T, row.names = F, quote = F)
+```
+
+
+```{r}
+g <- ggplot(res_df %>% slice_min(order_by = qvalue, n = 20, with_ties = F) )+
+  geom_point(aes(x = -log10(p.adjust), y = reorder(Description, -log10(p.adjust)), color = FoldEnrichment,size = Count))+theme_light()+scale_color_gradientn(colors = c("orange","red2","darkred"))+scale_radius(range = c(2, 6))+
+  xlab("-log10 adjusted p-value")+
+  ylab("GO Biological Processes")+
+  theme(axis.text.y = element_text(size = 18,face = "bold"),
+        axis.title.x = element_text(size = 12,face = "bold"),
+        axis.title.y = element_blank(),
+        title = element_text(size = 12,face = "bold"))+
+  ggtitle("GO Biological Processes")
+
+g 
+ggsave(filename = paste0(outdir,"Myct1-pos_vs_Myct1-neg_up-DEGs_enrichGO_BP.pdf"),width = 12, height = 6, plot = g)
+```
+
+```{r}
+ego <- enrichGO(gene         = Myct1_DEG$gene[Myct1_DEG$p_val_adj <= 0.01 & Myct1_DEG$avg_log2FC <  -0.5] ,
+                OrgDb         = org.Mm.eg.db,
+                keyType       = 'SYMBOL',
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05)
+head(ego, 3)  
+```
+
+```{r}
+res_df <- ego@result
+```
+
+```{r}
+write.table(res_df, file = paste0(outdir,"EC_Myct1-pos_down_DEG_EnrichGO_BP.tsv"), sep = "\t", col.names = T, row.names = F, quote = F)
+```
+
+
+```{r}
+g <- ggplot(res_df %>% slice_min(order_by = qvalue, n = 20, with_ties = F) )+
+  geom_point(aes(x = -log10(p.adjust), y = reorder(Description, -log10(p.adjust)), color = FoldEnrichment,size = Count))+theme_light()+scale_color_gradientn(colors = c("orange","red2","darkred"))+scale_radius(range = c(2, 6))+
+  xlab("-log10 adjusted p-value")+
+  ylab("GO Biological Processes")+
+  theme(axis.text.y = element_text(size = 18,face = "bold"),
+        axis.title.x = element_text(size = 12,face = "bold"),
+        axis.title.y = element_blank(),
+        title = element_text(size = 12,face = "bold"))+
+  ggtitle("GO Biological Processes")
+
+g 
+ggsave(filename = paste0(outdir,"Myct1-pos_vs_Myct1-neg_down-DEGs_enrichGO_BP.pdf"),width = 12, height = 6, plot = g)
+```
+

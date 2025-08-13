@@ -1,0 +1,341 @@
+---
+title: "1-2-1_analyze_T_cells"
+output: html_document
+date: "2025-04-11"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "RDS/"
+outdir <- "T_cells_out/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+```{r}
+lymphocytes <- readRDS(file = paste0(indir,"lymphocytes_V1p3.RDS"))
+```
+
+## subset T cells
+
+```{r}
+VlnPlot(lymphocytes, features = c("Cd3e"))+scale_fill_manual(values = pal)
+VlnPlot(lymphocytes, features = c("Cd4"))+scale_fill_manual(values = pal)
+VlnPlot(lymphocytes, features = c("Cd8a"))+scale_fill_manual(values = pal)
+VlnPlot(lymphocytes, features = c("Cd19"))+scale_fill_manual(values = pal)
+VlnPlot(lymphocytes, features = c("Mki67"))+scale_fill_manual(values = pal)
+```
+
+```{r}
+DimPlot(lymphocytes,label = T)+scale_color_manual(values = pal)
+```
+
+isolate all Cd3e+ clusters
+
+```{r}
+T_cells <- subset(lymphocytes, idents = c(1,2,3,4,5,6,8,9,11))
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+```
+
+```{r}
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:20,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:20,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells)
+```
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.6"
+DimPlot(T_cells, group.by = "RNA_snn_res.0.6",label = T)+scale_color_manual(values = pal)
+DimPlot(T_cells, group.by = "orig.ident",shuffle = T)+scale_color_manual(values = pal)
+FeaturePlot(T_cells, features = "Adgre1",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+VlnPlot(T_cells,features = c("log10_nFeature_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("log10_nCount_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("percent.mt"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+DotPlot(T_cells,features = c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67"),group.by = "RNA_snn_res.0.6")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(T_cells,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Arg1","Mrc1","Nos2","Adgre1","Lyz2","Cx3cr1","Cxcr3","Lgals3","Lamp3","Trem2","Apoe","Gpnmb"),group.by = "RNA_snn_res.0.6")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(T_cells,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Tcf7","Lef1","Foxp3","Klrb1c","Tyrobp","Prf1","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Tox","Eomes","Ikzf2","Mki67","H2-Ab1","Cd74"),group.by = "RNA_snn_res.0.6")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+
+```
+remove c6:
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.6"
+T_cells <- subset(T_cells,idents = 6, invert = T)
+```
+
+```{r}
+DimPlot(T_cells, group.by = "RNA_snn_res.0.6",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:20,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:20,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells)
+```
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.6"
+DimPlot(T_cells, group.by = "RNA_snn_res.0.6",label = T)+scale_color_manual(values = pal)
+DimPlot(T_cells, group.by = "orig.ident",shuffle = T)+scale_color_manual(values = pal)
+FeaturePlot(T_cells, features = "Adgre1",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+VlnPlot(T_cells,features = c("log10_nFeature_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("log10_nCount_RNA"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("percent.mt"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+DotPlot(T_cells,features = c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67"),group.by = "RNA_snn_res.0.6")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(T_cells,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Arg1","Mrc1","Nos2","Adgre1","Lyz2","Cx3cr1","Cxcr3","Lgals3","Lamp3","Trem2","Apoe","Gpnmb"),group.by = "RNA_snn_res.0.6")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+DotPlot(T_cells,features = c("Ptprc","Cd3e","Cd8a","Cd8b1","Cd4","Ccr7","Tcf7","Lef1","Foxp3","Klrb1c","Tyrobp","Prf1","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Tox","Eomes","Ikzf2","Mki67","H2-Ab1","Cd74"),group.by = "RNA_snn_res.0.6")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+
+
+```
+
+```{r}
+DimPlot(T_cells, group.by = "RNA_snn_res.0.6",label = T)+scale_color_manual(values = pal)
+DotPlot(T_cells,features = c("Ptprc","Cd19","Cd3e","Cd8a","Cd8b1","Cd4","Foxp3","Rorc","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Klrb1c","Ncr1","Prf1","Isg15","Cx3cr1","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Havcr2","Tox","Eomes","Ikzf2","Il1r1","Il7r","Mki67"),group.by = "RNA_snn_res.0.6",cluster.idents = T)+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+```{r}
+saveRDS(T_cells, file = paste0(indir,"T_cells_V1p4.Rds"))
+```
+
+```{r}
+DimPlot(T_cells, group.by = "annotation_V1",label = T)+scale_color_manual(values = pal)
+```
+
+## check T cell clusters with TIL markers
+
+```{r}
+T_cells <- readRDS(paste0(indir,"T_cells_V1p4.Rds"))
+```
+
+
+```{r}
+VlnPlot(T_cells, features = "Zfp683")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Cxcr6")+scale_fill_manual(values = pal)
+#Tfh
+VlnPlot(T_cells, features = "Cxcr5")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Icos")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Cxcl13")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Il6ra")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Il4")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Stat3")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Bcl6")+scale_fill_manual(values = pal)
+
+```
+
+```{r}
+VlnPlot(T_cells, features = "Ifng")+scale_fill_manual(values = pal)
+VlnPlot(T_cells, features = "Il21")+scale_fill_manual(values = pal)
+```
+
+
+
+```{r}
+DimPlot(T_cells, group.by = "RNA_snn_res.0.6",label = T)+scale_color_manual(values = pal)
+```
+
+### check pub markers
+
+C0: Naive (Tox+Pdcd1- Tcf7+)
+C1: NKT-like
+C2: Treg
+C3: Th2
+C4: Tem/ex
+C5*: Th/Tcm
+C6: Tex
+C7: gdT
+C8: proliferating
+
+
+T cells in chronic antigen exposure are epigenetically primed disregarding the cell states. (Need to double-check if nascent non-exhaustion-primed T cells still exit in chronic infection models).
+
+TIL: Pdcd1+ Tox+ Ctla4+ Tigit+ are exhaustion signatures; 
+stem-like subset: Lef1, Tcf7+, Xcl1, Ccr7, Il7r
+Transitory: Prdm1, Nr4a1, Fos, Jun, Ifng; effector: Gzma, Gzmb, Prf1, Gnly; can express Havcr2, Entpd1. 
+Terminal differentiated: ...
+
+
+```{r}
+T_cells@meta.data <- T_cells@meta.data %>% mutate(annotation_V1 = case_match(
+  as.character(RNA_snn_res.0.6),
+  "0" ~ "c0: Naive CD8 T",
+  "1" ~ "c1: NKT-like",
+  "2" ~ "c2: Treg",
+  "3" ~ "c3: Th2",
+  "4" ~ "c4: Tem/ex",
+  "5" ~ "c5: Th",
+  "6" ~ "c6: Tex",
+  "7" ~ "c7: gdT",
+  "8" ~ "c8: Proliferating"
+))
+```
+
+
+```{r}
+saveRDS(T_cells, file = paste0(indir,"T_cells_V1p4.Rds"))
+```
+
+
+```{r}
+DotPlot(T_cells,features = c("Pdcd1","Havcr2","Tox","Ctla4","Cd3e","Cd8a","Cd8b1","Cd4","Foxp3","Rorc","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Slamf6","Fos","Prdm1","Xcl1","Il7r","Klrb1c","Klra3","Klrd1","Zeb2","Prf1","Isg15","Cx3cr1","Gzma","Gzmk","Lag3","Cd44","Eomes","Ikzf2","Il1r1","Entpd1","Mki67"),group.by = "RNA_snn_res.0.6",cluster.idents = F)+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+All clusters are Tox+, so epigenetically all clusters maybe primed toward the exhaustion lineage.
+
+```{r}
+VlnPlot(T_cells,features = c("Pdcd1"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("Tox"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("Havcr2"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("Lag3"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("Ctla4"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+# memory marker
+VlnPlot(T_cells,features = c("Gpr183"),alpha = 0.1) +scale_fill_manual(values = pal)
+# transition marker
+VlnPlot(T_cells,features = c("S100a4"),alpha = 0.1) +scale_fill_manual(values = pal)
+VlnPlot(T_cells,features = c("Lgals3"),alpha = 0.1) +scale_fill_manual(values = pal)
+
+# Teeff
+VlnPlot(T_cells,features = c("Mif"),alpha = 0.1) +scale_fill_manual(values = pal)
+```
+
+### check DEG
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.6"
+res06_markers <- FindAllMarkers(T_cells)
+```
+
+
+```{r}
+agg_exp <- AggregateExpression(T_cells, group.by = "RNA_snn_res.0.6", features = res06_markers$gene[res06_markers$p_val_adj < 0.01])
+```
+
+```{r}
+top_markers <- res06_markers %>% filter(p_val_adj < 0.01) %>% filter(!grepl("^Gm|Rik$|Cd8a|Cd8b|Cd4",gene)) %>% group_by(cluster) %>% slice_max(order_by = pct.1*avg_log2FC, n = 10)
+```
+
+```{r}
+g <- DotPlot(T_cells, features = top_markers$gene, group.by = "RNA_snn_res.0.6")+
+  RotatedAxis()+
+  scale_color_gradientn(colors = c("grey90","red2","red3"))
+ggsave(filename = paste0(outdir,"T_cells_V1p4_res06_cluster-marker-DotPlot.pdf"), plot = g, width = 18, height = 4)
+```
+
+
+
+### calculate prop changes 
+
+since it doesn't make sense to calculate proportion for the Cd3e+ cells specifically, I need to pool the total immune cell number for propor calculation
+
+```{r}
+myeloid <- readRDS(file = paste0(indir,"myeloid_V1p3.RDS"))
+lymphocytes <- readRDS(file = paste0(indir,"lymphocytes_V1p3.RDS"))
+```
+
+```{r}
+pseudowhole <- merge(myeloid, lymphocytes)
+```
+
+```{r}
+sample_imm_size = data.frame(table(pseudowhole$orig.ident))
+```
+
+```{r}
+rm(pseudowhole)
+rm(myeloid)
+rm(lymphocytes)
+gc()
+```
+
+```{r}
+sample_imm_size <- sample_imm_size %>% rename(n_immune = Freq, orig.ident = Var1)
+```
+
+```{r}
+T_meta <- T_cells@meta.data %>% group_by(RNA_snn_res.0.6, orig.ident) %>% summarise(n_subpop = n()) 
+```
+
+```{r}
+clust_meta <- left_join(T_meta, sample_imm_size, by = "orig.ident")
+```
+
+```{r}
+clust_prop_grouped <- clust_meta %>% group_by(RNA_snn_res.0.6,orig.ident) %>% mutate(cluster_prop = n_subpop/n_immune)
+
+ratio <- clust_prop_grouped %>% group_by(RNA_snn_res.0.6) %>% reframe(FC = log2(cluster_prop[orig.ident == "KO_HC"]/cluster_prop[orig.ident == "WT_HC"]))
+
+g3 <- ggplot(clust_prop_grouped,aes(x = orig.ident, y = cluster_prop, fill = RNA_snn_res.0.6))+
+  geom_bar(stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("proportions in immune cells")+
+  xlab("res=0.6 clusters")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))+
+  facet_wrap(~RNA_snn_res.0.6, scales = "free")
+g3  
+  
+g4 <- ggplot(ratio, aes( x = reorder(RNA_snn_res.0.6, -FC), y = FC))+
+  geom_bar(aes(fill = RNA_snn_res.0.6),stat = "identity", position = "dodge")+
+  scale_fill_manual(values = pal)+theme_classic()+
+  ylab("log2 proportion in KO v.s. WT immune cells")+
+  xlab("res=0.6 clusters")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+g4
+```
+

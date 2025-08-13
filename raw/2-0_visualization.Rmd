@@ -1,0 +1,254 @@
+---
+title: "2-0_visualization_markers+proportion"
+output: html_document
+date: "2025-04-18"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+library(mascarade)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+
+```{r}
+indir <- "RDS/"
+outdir <- "prelim_analysis/visualization/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+## load objects
+
+```{r}
+T_cells <- readRDS(paste0(indir,"T_cells_V1p4.Rds"))
+myeloid <- readRDS(file = paste0(indir,"myeloid_V1p5.RDS"))
+lymphocytes <- readRDS(file = paste0(indir,"lymphocytes_V1p4.RDS"))
+whole <- readRDS(file = paste0(indir,"whole_V1p6.RDS"))
+```
+
+
+## create umap with annotation
+
+### whole dataset
+
+```{r}
+table(whole$annotation_V1)
+```
+
+
+```{r}
+# add an intermediate layer
+
+whole@meta.data <- whole@meta.data %>% mutate(
+  cell_type = case_match(
+    annotation_V1,
+    "c0: Naive CD8 T" ~ "CD8 T cells",
+    "c1: NKT-like" ~ "NKT",
+    "c2: Treg" ~ "CD4 T cells",
+    "c3: Th2" ~ "CD4 T cells",
+    "c4: Tem/ex" ~ "CD8 T cells",
+    "c5: Th" ~ "CD4 T cells",
+    "c6: Tex" ~ "CD4 T cells",
+    "c7: gdT" ~ "gdT",
+    "c8: Proliferating" ~ "Proliferating T cells",
+    "L0: NK" ~ "NK",
+    "L10: ILC3" ~ "ILC",
+    "L7: B cells" ~ "B cells",
+    "M0: mo-Mac1" ~ "mo-Mac",
+    "M1: mo-Mac2" ~ "mo-Mac",
+     "M7: cDC1_DC2" ~ "DC",
+    "M8: mast cells" ~ "mast cells",
+    "M2: Neutrophil" ~ "Neutrophil",
+    "M3: cDC2" ~ "DC",
+    "M4: mo-Mac3" ~ "mo-Mac",
+    "M5: migDC" ~ "DC",
+    "M6: proliferating mo-Mac" ~ "Proliferating mo-Mac",
+  )
+)
+whole$cell_type = factor(whole$cell_type, levels = c("CD8 T cells",
+                                                     "NKT","CD4 T cells",
+                                                     "gdT",
+                                                     "Proliferating T cells",
+                                                     "NK",
+                                                     "ILC",
+                                                     "B cells",
+                                                     "mo-Mac",
+                                                     "Neutrophil",
+                                                     "DC",
+                                                     "Proliferating mo-Mac",
+                                                     "mast cells"))
+
+```
+
+```{r}
+saveRDS(whole, file = paste0(outdir,"whole_V1p6.RDS"))
+```
+
+
+```{r}
+# mascarade does not work well for whole
+
+maskTable <- generateMask(dims=whole@reductions$umap@cell.embeddings, 
+                          clusters=whole$annotation_V1)
+data <- data.table(whole@reductions$umap@cell.embeddings, 
+                   cluster=whole$annotation_V1,
+                   whole@meta.data)
+
+g <- DimPlot(whole, group.by = "annotation_V1",label = T, repel = T)+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap.pdf"), plot = g, width = 10, height = 7)
+
+g <- DimPlot(whole, group.by = "annotation_V1",label = F, repel = T, split.by = "orig.ident")+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_split.pdf"), plot = g, width = 15, height = 7)
+
+
+```
+
+
+```{r}
+maskTable <- generateMask(dims=whole@reductions$umap@cell.embeddings, 
+                          clusters=whole$annotation_V1)
+data <- data.table(whole@reductions$umap@cell.embeddings, 
+                   cluster=whole$annotation_V1,
+                   whole@meta.data)
+centers <- data %>% 
+  dplyr::group_by(cluster) %>% 
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2)) 
+centers.2 <- data %>%
+  dplyr::group_by(label) %>%
+  dplyr::summarize(umap_1 = median(umap_1), umap_2 = median(umap_2))
+
+
+g <- ggplot(data, aes(x=umap_1, y=umap_2)) + 
+    geom_point(aes(color=cluster), size = 0.5) + 
+    geom_path(data=maskTable, aes(group=group)) +
+  geom_text(data = centers.2, aes(label=Cluster_new), size = 3.5, color = "black") +
+    scale_color_manual(values = pal)+
+    coord_fixed() + 
+    theme_classic()+facet_wrap(~orig.ident)+theme(legend.position = "bottom")+
+  guides(color = guide_legend(override.aes = list(size = 2))) 
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_annotated_umap_split_mascarade.pdf"), plot = g, width = 15, height = 7)
+```
+
+```{r}
+g <- DimPlot(whole, group.by = "compartment",label = T, repel = T,split.by = "orig.ident",ncol = 1)+scale_color_manual(values = c(brewer.pal(11, "BrBG")[8],brewer.pal(11, "RdYlBu")[1]))
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_compartment_umap.pdf"), plot = g, width = 8, height = 12)
+
+g <- DimPlot(whole, group.by = "cell_type",label = T, repel = T)+scale_color_manual(values = c(colorRampPalette(brewer.pal(11, "BrBG")[c(1:3,8:11)])(8),colorRampPalette(brewer.pal(11, "RdYlBu")[c(1:3,8:11)])(7)))
+g
+ggsave(filename = paste0(outdir,"whole_V1p6_cell-type_umap.pdf"), plot = g, width =8, height = 6)
+```
+
+### lymphocytes
+
+```{r}
+g <- DimPlot(lymphocytes, group.by = "annotation_V1")+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"lymphocyte_V1p4_annotation_umap.pdf"), plot = g, width =8, height = 6)
+```
+
+
+
+### myeloid
+
+```{r}
+g <- DimPlot(myeloid, group.by = "annotation_V1")+scale_color_manual(values = pal)
+g
+ggsave(filename = paste0(outdir,"myeloid_V1p5_annotation_umap.pdf"), plot = g, width =8, height = 6)
+```
+
+
+## marker featureplots
+
+### whole
+
+```{r}
+whole_markers <- c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Fcgr3","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67")
+
+glist <- lapply(whole_markers, function(x){
+  FeaturePlot(whole, features = x,label = F)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 5)
+ggsave(paste0(outdir, "whole_marker_featurePlot.pdf"), plot = g, width = 30, height = 30)
+
+
+```
+
+
+### lymphocytes
+
+```{r}
+whole_markers <- c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Fcgr3","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67")
+
+glist <- lapply(whole_markers, function(x){
+  FeaturePlot(lymphocytes, features = x,label = F)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 5)
+ggsave(paste0(outdir, "lymphocytes_marker-sanity-check_featurePlot.pdf"), plot = g, width = 30, height = 30)
+
+
+```
+
+```{r}
+
+T_cell_markers <- c("Pdcd1","Havcr2","Tox","Ctla4","Cd3e","Cd8a","Cd4","Foxp3","Rorc","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Slamf6","Fos","Prdm1","Xcl1","Il7r","Klrb1c","Klra3","Zeb2","Prf1","Isg15","Gzma","Gzmk","Lag3","Cd44","Eomes","Ikzf2","Mki67") # "Il1r1","Entpd1",
+
+
+glist <- lapply(T_cell_markers, function(x){
+  FeaturePlot(lymphocytes, features = x,label = F)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 5)
+ggsave(paste0(outdir, "T-cell_markers_featurePlot.pdf"), plot = g, width = 30, height = 30)
+
+```
+
+
+
+### myeloid
+
+```{r}
+whole_markers <- c("Ptprc","Cd3e","Cd8a","Cd4","Cd19","Ccr2","Adgre1","Lyz2","Klrb1c","Tyrobp","Ncam1","Xcr1","Ncr1","Siglech","Mpo","S100a8","Cd200r3","Fcer1a","Fcer2a","Fcgr3","Flt3","Pecam1","Epcam","Krt1","Myct1","Hbb-bs","Pf4","Col1a1","Mki67")
+
+glist <- lapply(whole_markers, function(x){
+  FeaturePlot(myeloid, features = x,label = F)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 5)
+ggsave(paste0(outdir, "myeloid_marker-sanity-check_featurePlot.pdf"), plot = g, width = 30, height = 30)
+
+
+```
+
+```{r}
+
+
+mac_markers <- c("Mrc1","Cx3cr1","Trem2","Mertk","Nos2","Arg1","Chil3","Il1b","Tnf")
+
+glist <- lapply(mac_markers, function(x){
+  VlnPlot(myeloid,features = x,group.by = "annotation_V1",split.by = "orig.ident")+scale_fill_manual(values = c("KO_HC"="darkblue","WT_HC" = "red2"))
+})
+g <- gridExtra::grid.arrange(grobs = glist, ncol = 3)
+ggsave(paste0(outdir, "myeloid_mac-subtype-marker_VlnPlot.pdf"), plot = g, width = 20, height = 20)
+```
+
+```{r}
+VlnPlot(myeloid,features = "Ccr2",group.by = "orig.ident")+scale_fill_manual(values = c("KO_HC"="darkblue","WT_HC" = "red2"))
+```
+

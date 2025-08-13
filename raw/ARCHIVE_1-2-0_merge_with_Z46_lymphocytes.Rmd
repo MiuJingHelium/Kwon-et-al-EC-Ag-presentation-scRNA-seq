@@ -1,0 +1,246 @@
+---
+title: "1-2-0_merge_with_Z46_lymphocytes"
+output: html_document
+date: "2025-04-11"
+---
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(scater)
+```
+
+```{r}
+library(RColorBrewer)
+getPalette.1 <- colorRampPalette(brewer.pal(n = 12,name = "Set3"))
+pal <- c(brewer.pal(n = 12,name = "Set3"),brewer.pal(n = 12,name = "Paired"),brewer.pal(n = 8,name = "Accent"))
+pal[2] <- "darkred"
+pal[9] <- "grey25"
+pal[23] <- "turquoise4"
+pal[19] <- colors()[60]
+pal[13] <- "darkblue"
+pal[28] <- colors()[16]
+pal[31] <- colors()[54] 
+pal <- c(pal,colors()[c(85,84,83,89,45,31,41,42,26,29,10,139,107,108,120,109,119,121,143)])
+```
+
+```{r}
+indir <- "Z46_RDS/"
+outdir <- "RDS/"
+if (!dir.exists(outdir)) dir.create(outdir)
+```
+
+## load Ashraf's data
+
+```{r}
+load(paste0(indir,"lymphoid_V2p4_pub_match_labeled.Robj"))
+```
+
+```{r}
+table(lymphoid$label_ref)
+```
+
+```{r}
+colnames(lymphoid@meta.data)
+```
+```{r}
+lymphoid@meta.data <- lymphoid@meta.data %>% dplyr::rename(log10_nFeature_RNA = nFeature_RNA_log10,
+                                                    log10_nCount_RNA = nCount_RNA_log10)
+```
+
+```{r}
+colnames(lymphoid@meta.data)
+```
+
+```{r}
+lymphoid@meta.data <- lymphoid@meta.data %>% dplyr::rename(annotation_V1 = annotation)
+```
+
+```{r}
+lymphoid$dataset <- "Ashraf_Z46"
+```
+
+## load Yoojung's data
+
+```{r}
+lymphocytes <- readRDS(file = paste0(outdir,"lymphocytes_V1p3.RDS"))
+```
+
+```{r}
+colnames(lymphocytes@meta.data)
+```
+```{r}
+lymphocytes$dataset <- "Yoojung_Myct1"
+```
+
+## merge datasets
+
+```{r}
+integrated <- merge(lymphocytes, lymphoid)
+integrated <- JoinLayers(integrated)
+```
+
+```{r}
+integrated <- NormalizeData(object = integrated, normalization.method = "LogNormalize", scale.factor = 10000)
+integrated <- FindVariableFeatures(object = integrated, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(integrated) <-  VariableFeatures(integrated)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(integrated))]
+VariableFeaturePlot(integrated)
+integrated <- ScaleData(object = integrated, features = VariableFeatures(object = integrated), vars.to.regress = c("nCount_RNA", "percent.mt"))
+integrated <- RunPCA(object = integrated,
+                features =  VariableFeatures(object = integrated),
+                dims = 1:50)
+gc()
+ElbowPlot(integrated,ndims = 50)
+```
+
+```{r}
+integrated <- RunHarmony(object = integrated, group.by.vars = c("orig.ident","dataset"), max.iter.harmony = 20)
+integrated <- RunUMAP(integrated,dims = 1:30,reduction = "harmony")
+integrated <- RunTSNE(integrated,dims = 1:30,reduction = "harmony")
+
+integrated <- FindNeighbors(integrated, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  integrated <- FindClusters(object = integrated, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+integrated <- JoinLayers(integrated)
+```
+
+```{r}
+integrated@meta.data <- integrated@meta.data %>% mutate(
+  condition = case_match(
+    orig.ident,
+    "WT_HC" ~ "WT",
+    "KO_HC" ~ "Cdh5-Cre Myct1-KO",
+    "Control" ~ "WT-Control",
+    "ZBTB46" ~ "Zbtb46-OE"
+  )
+)
+```
+
+
+```{r}
+DimPlot(integrated,shuffle = T, group.by = "dataset")
+DimPlot(integrated,shuffle = T, group.by = "condition")+scale_color_manual(values = pal[20:23])
+Idents(integrated) <- "RNA_snn_res.0.3"
+DimPlot(integrated, group.by = "RNA_snn_res.0.3",label = T)+scale_color_manual(values = pal)
+# DimPlot(integrated, group.by = "annotation_V1",label = T)+scale_color_manual(values = pal)
+```
+```{r}
+DotPlot(integrated,features = c("Ptprc","Cd19","Cd3e","Cd8a","Cd8b1","Cd4","Foxp3","Rorc","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Klrb1c","Tyrobp","Prf1","Isg15","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Havcr2","Tox","Eomes","Ikzf2","Il1r1","Il7r","Mki67"),group.by = "RNA_snn_res.0.3")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+```{r}
+VlnPlot(integrated, features = "percent.mt",split.by = "dataset")
+VlnPlot(integrated, features = "log10_nFeature_RNA")
+VlnPlot(integrated, features = "log10_nCount_RNA")
+```
+
+
+
+```{r}
+ann_overlap <- as.data.frame(table(integrated$RNA_snn_res.0.4, integrated$annotation_V1))
+```
+
+```{r}
+FeaturePlot(integrated, features = "Cd3e",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(integrated, features = "Cd4",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(integrated, features = "Cd8a",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(integrated, features = "Mki67",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(integrated, features = "Ncr1",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+FeaturePlot(integrated, features = "Tyrobp",label = T)+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+## isolate T cells
+
+```{r}
+T_cells <- subset(integrated, idents = c(9), invert = T)
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident","dataset"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:30,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:30,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:30,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells)
+```
+
+```{r}
+DimPlot(T_cells,shuffle = T, group.by = "dataset")
+DimPlot(T_cells,shuffle = T, group.by = "condition")+scale_color_manual(values = pal[20:23])
+Idents(T_cells) <- "RNA_snn_res.0.3"
+DimPlot(T_cells, group.by = "RNA_snn_res.0.3",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Ptprc","Cd19","Cd3e","Cd8a","Cd8b1","Cd4","Foxp3","Rorc","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Klrb1c","Tyrobp","Ncr1","Prf1","Isg15","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Havcr2","Tox","Eomes","Ikzf2","Il1r1","Il7r","Mki67"),group.by = "RNA_snn_res.0.3")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+remove NKs: c0, c2,c3,c6,c7,c10,c12; c5 is proliferating; keep temporarily
+
+```{r}
+Idents(T_cells) <- "RNA_snn_res.0.3"
+T_cells <- subset(T_cells, idents = c(0,2,3,6,7,10,12), invert = T)
+
+```
+
+```{r}
+T_cells <- FindVariableFeatures(object = T_cells, selection.method = 'mean.var.plot', mean.cutoff = c(0.0125, 5), dispersion.cutoff = c(0.5, Inf))
+VariableFeatures(T_cells) <-  VariableFeatures(T_cells)[!grepl("^Tra|^Trb|^Igh|^Igk|Mamu-a", VariableFeatures(T_cells))]
+VariableFeaturePlot(T_cells)
+T_cells <- ScaleData(object = T_cells, features = VariableFeatures(object = T_cells), vars.to.regress = c("nCount_RNA", "percent.mt"))
+T_cells <- RunPCA(object = T_cells,
+                features =  VariableFeatures(object = T_cells),
+                dims = 1:50)
+gc()
+ElbowPlot(T_cells,ndims = 50)
+
+T_cells <- RunHarmony(object = T_cells, group.by.vars = c("orig.ident","dataset"), max.iter.harmony = 20)
+T_cells <- RunUMAP(T_cells,dims = 1:20,reduction = "harmony")
+T_cells <- RunTSNE(T_cells,dims = 1:20,reduction = "harmony")
+
+T_cells <- FindNeighbors(T_cells, dims = 1:20,reduction = "harmony")
+for(res in seq(0.1, 1, 0.1))  {   
+  T_cells <- FindClusters(object = T_cells, resolution = res, print.output = 0, save.SNN = TRUE)
+} 
+gc()
+T_cells <- JoinLayers(T_cells)
+```
+
+```{r}
+DimPlot(T_cells,shuffle = T, group.by = "dataset")
+DimPlot(T_cells,shuffle = T, group.by = "condition")+scale_color_manual(values = pal[20:23])
+Idents(T_cells) <- "RNA_snn_res.0.3"
+DimPlot(T_cells, group.by = "RNA_snn_res.0.3",label = T)+scale_color_manual(values = pal)
+```
+
+```{r}
+DotPlot(T_cells,features = c("Ptprc","Cd19","Cd3e","Cd8a","Cd8b1","Cd4","Foxp3","Rorc","Gata3","Tbx21","Ccr7","Tcf7","Lef1","Klrb1c","Tyrobp","Ncr1","Prf1","Isg15","Gzma","Gzmk","Lag3","Cd44","Pdcd1","Havcr2","Tox","Eomes","Ikzf2","Il1r1","Il7r","Mki67"),group.by = "RNA_snn_res.0.3")+RotatedAxis()+scale_color_gradientn(colors = c("grey90","red2","red3"))
+```
+
+```{r}
+clust_prop <- T_cells@meta.data %>% group_by(RNA_snn_res.0.3, condition) %>% summarise(n = n())%>% ungroup() %>% group_by() %>% mutate(prop = n/sum(n))
+```
+
+```{r}
+g <- ggplot(clust_prop)+
+  geom_bar(aes(x = condition, y = prop, fill = condition),stat = "identity", position = "dodge")+facet_wrap(~RNA_snn_res.0.3, scales = "free")+theme_classic()+
+  scale_fill_manual(values = pal[20:23])+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+ggsave("lymphocyte-T_integration_test_prop.pdf", plot = g, width = 6, height = 6)
+```
+
